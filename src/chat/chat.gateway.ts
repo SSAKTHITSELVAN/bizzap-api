@@ -1,4 +1,4 @@
-// src/modules/chat/chat.gateway.ts
+// src/chat/chat.gateway.ts
 import {
   WebSocketGateway,
   SubscribeMessage,
@@ -12,11 +12,23 @@ import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
+import { MessageType } from './entities/chat.entity';
+import { Readable } from 'stream';
+
+interface FileMessageData {
+  receiverId: string;
+  message?: string;
+  fileName: string;
+  fileData: string; // base64 encoded file data
+  mimeType: string;
+  fileSize: number;
+}
 
 @WebSocketGateway({
   cors: {
     origin: '*',
   },
+  maxHttpBufferSize: 50 * 1024 * 1024, // 50MB for file uploads
 })
 export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
@@ -91,6 +103,62 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('send_file')
+  async handleSendFile(
+    @MessageBody() data: FileMessageData,
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const senderId = client.data.companyId;
+      
+      // Convert base64 to buffer
+      const fileBuffer = Buffer.from(data.fileData, 'base64');
+      
+      // Create a mock Express.Multer.File object
+      const file: Express.Multer.File = {
+        fieldname: 'file',
+        originalname: data.fileName,
+        encoding: '7bit',
+        mimetype: data.mimeType,
+        size: data.fileSize,
+        buffer: fileBuffer,
+        destination: '',
+        filename: '',
+        path: '',
+        stream: Readable.from(fileBuffer),
+      };
+
+      const message = await this.chatService.sendFileMessage(
+        senderId,
+        data.receiverId,
+        file,
+        data.message
+      );
+
+      // Send confirmation to sender
+      client.emit('file_sent', {
+        success: true,
+        data: message,
+      });
+
+      // Send to receiver if online
+      const receiverSocketId = this.connectedUsers.get(data.receiverId);
+      if (receiverSocketId) {
+        this.server.to(receiverSocketId).emit('new_message', {
+          data: message,
+        });
+      }
+
+      return { success: true, data: message };
+    } catch (error) {
+      client.emit('file_error', {
+        success: false,
+        error: error.message,
+      });
+      return { success: false, error: error.message };
+    }
+  }
+
   @SubscribeMessage('join_conversation')
   async handleJoinConversation(
     @MessageBody() data: { companyId: string },
@@ -144,6 +212,34 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('request_file_url')
+  async handleRequestFileUrl(
+    @MessageBody() data: { messageId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    try {
+      const fileUrl = await this.chatService.generateFileUrl(
+        data.messageId,
+        client.data.companyId
+      );
+      
+      client.emit('file_url_response', {
+        success: true,
+        messageId: data.messageId,
+        fileUrl,
+      });
+      
+      return { success: true, fileUrl };
+    } catch (error) {
+      client.emit('file_url_error', {
+        success: false,
+        messageId: data.messageId,
+        error: error.message,
+      });
+      return { success: false, error: error.message };
+    }
+  }
+
   private getConversationRoom(companyId1: string, companyId2: string): string {
     const sorted = [companyId1, companyId2].sort();
     return `conversation_${sorted[0]}_${sorted[1]}`;
@@ -154,6 +250,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const socketId = this.connectedUsers.get(companyId);
     if (socketId) {
       this.server.to(socketId).emit('notification', notification);
+    }
+  }
+
+  // Method to broadcast file upload progress (if needed)
+  async sendUploadProgress(companyId: string, progress: { messageId: string; progress: number }) {
+    const socketId = this.connectedUsers.get(companyId);
+    if (socketId) {
+      this.server.to(socketId).emit('upload_progress', progress);
     }
   }
 }

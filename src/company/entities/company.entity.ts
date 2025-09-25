@@ -3,6 +3,7 @@ import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateCol
 import { Lead } from '../../leads/entities/lead.entity';
 import { Product } from '../../products/entities/product.entity';
 import { Follower } from '../../followers/entities/follower.entity';
+import { Post } from '../../posts/entities/post.entity';
 
 @Entity('companies')
 export class Company {
@@ -83,4 +84,7 @@ export class Company {
 
   @OneToMany(() => Follower, (follower) => follower.followerCompany)
   followers: Follower[];
+
+  @OneToMany(() => Post, (post) => post.company)
+  posts: Post[];
 }

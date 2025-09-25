@@ -1,6 +1,23 @@
 // src/modules/chat/chat.controller.ts
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { 
+  Controller, 
+  Get, 
+  Post, 
+  Body, 
+  Patch, 
+  Param, 
+  Delete, 
+  UseGuards, 
+  Request,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { UpdateMessageDto } from './dto/update-message.dto';
@@ -16,14 +33,80 @@ export class ChatController {
   }
 
   @Post('send')
-  @ApiOperation({ summary: 'Send a message to another company' })
+  @ApiOperation({ summary: 'Send a text message to another company' })
   @ApiResponse({ status: 201, description: 'Message sent successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async sendMessage(@Request() req, @Body() sendMessageDto: SendMessageDto) {
+    if (!sendMessageDto.message && !sendMessageDto.fileName) {
+      throw new BadRequestException('Either message or file must be provided');
+    }
+
     const message = await this.chatService.sendMessage(req.user.companyId, sendMessageDto);
     return {
       message: 'Message sent successfully',
       data: message,
+    };
+  }
+
+  @Post('send-file')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Send a file (image, video, PDF, etc.) to another company' })
+  @ApiBody({
+    description: 'File upload with optional message',
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+        receiverId: {
+          type: 'string',
+          format: 'uuid',
+          description: 'UUID of the company receiving the file',
+        },
+        message: {
+          type: 'string',
+          description: 'Optional text message to accompany the file',
+        },
+      },
+      required: ['file', 'receiverId'],
+    },
+  })
+  @ApiResponse({ status: 201, description: 'File sent successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request - invalid file or missing receiverId' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async sendFile(
+    @Request() req,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 50 * 1024 * 1024 }), // 50MB
+          new FileTypeValidator({ 
+            fileType: /(image|video|application\/pdf|text|application\/msword|application\/vnd\.).*/ 
+          }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+    @Body('receiverId') receiverId: string,
+    @Body('message') message?: string,
+  ) {
+    if (!receiverId) {
+      throw new BadRequestException('receiverId is required');
+    }
+
+    const fileMessage = await this.chatService.sendFileMessage(
+      req.user.companyId,
+      receiverId,
+      file,
+      message
+    );
+
+    return {
+      message: 'File sent successfully',
+      data: fileMessage,
     };
   }
 
@@ -47,6 +130,20 @@ export class ChatController {
     return {
       message: 'Chat history retrieved successfully',
       data: history,
+    };
+  }
+
+  @Get('file/:messageId')
+  @ApiOperation({ summary: 'Get a downloadable URL for a file in a message' })
+  @ApiParam({ name: 'messageId', description: 'Message UUID containing the file' })
+  @ApiResponse({ status: 200, description: 'File URL generated successfully' })
+  @ApiResponse({ status: 403, description: 'You can only access files from your conversations' })
+  @ApiResponse({ status: 404, description: 'Message or file not found' })
+  async getFileUrl(@Request() req, @Param('messageId') messageId: string) {
+    const fileUrl = await this.chatService.generateFileUrl(messageId, req.user.companyId);
+    return {
+      message: 'File URL generated successfully',
+      data: { fileUrl },
     };
   }
 
@@ -74,10 +171,10 @@ export class ChatController {
   }
 
   @Patch('message/:messageId')
-  @ApiOperation({ summary: 'Edit a message' })
+  @ApiOperation({ summary: 'Edit a text message (only text messages can be edited)' })
   @ApiParam({ name: 'messageId', description: 'Message UUID to edit' })
   @ApiResponse({ status: 200, description: 'Message updated successfully' })
-  @ApiResponse({ status: 403, description: 'Can only edit your own messages' })
+  @ApiResponse({ status: 403, description: 'Can only edit your own text messages' })
   async updateMessage(
     @Request() req,
     @Param('messageId') messageId: string,
@@ -91,7 +188,7 @@ export class ChatController {
   }
 
   @Delete('message/:messageId')
-  @ApiOperation({ summary: 'Delete a message' })
+  @ApiOperation({ summary: 'Delete a message (and associated file if any)' })
   @ApiParam({ name: 'messageId', description: 'Message UUID to delete' })
   @ApiResponse({ status: 200, description: 'Message deleted successfully' })
   @ApiResponse({ status: 403, description: 'Can only delete your own messages' })
