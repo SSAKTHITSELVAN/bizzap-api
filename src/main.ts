@@ -37,7 +37,6 @@ async function bootstrap() {
     .addTag('Followers', 'Company follow system')
     .addTag('Search', 'Search functionality')
     .addTag('Chat', 'Real-time chat system')
-    .addTag('Post', 'tik tok like post system')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

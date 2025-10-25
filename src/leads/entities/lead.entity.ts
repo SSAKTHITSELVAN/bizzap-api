@@ -13,8 +13,21 @@ export class Lead {
   @Column('text')
   description: string;
 
+  // Changed: Now stores S3 key instead of URL
   @Column({ nullable: true })
-  image: string;
+  imageKey: string; // S3 key for the image
+
+  @Column({ nullable: true })
+  imageUrl: string; // Temporary field for backward compatibility (can be removed later)
+
+  @Column({ nullable: true })
+  imageName: string; // Original filename
+
+  @Column({ nullable: true })
+  imageSize: number; // File size in bytes
+
+  @Column({ nullable: true })
+  imageMimeType: string; // MIME type of the image
 
   @Column({ nullable: true })
   budget: string;

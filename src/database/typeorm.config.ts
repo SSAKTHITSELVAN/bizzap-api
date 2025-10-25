@@ -8,6 +8,7 @@ import { Chat } from '../chat/entities/chat.entity';
 import { Post } from '../posts/entities/post.entity';
 import { PostLike } from '../posts/entities/post-like.entity';
 import { PostComment } from '../posts/entities/post-comment.entity';
+import { PostComment } from '../posts/entities/post-save.entity';
 
 export const typeOrmConfig: TypeOrmModuleOptions = {
   type: 'postgres',

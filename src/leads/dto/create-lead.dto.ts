@@ -1,4 +1,4 @@
-// src/modules/leads/dto/create-lead.dto.ts - Updated with Swagger decorators
+// src/modules/leads/dto/create-lead.dto.ts
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -18,15 +18,6 @@ export class CreateLeadDto {
   @IsString()
   @IsNotEmpty()
   description: string;
-
-  @ApiProperty({
-    description: 'Optional image URL for the lead',
-    example: 'https://example.com/lead-image.jpg',
-    required: false,
-  })
-  @IsOptional()
-  @IsString()
-  image?: string;
 
   @ApiProperty({
     description: 'Budget for the lead (e.g., $5000)',
@@ -51,4 +42,15 @@ export class CreateLeadDto {
   @IsOptional()
   @IsString()
   location?: string;
+}
+
+// DTO for creating lead with file upload
+export class CreateLeadWithFileDto extends CreateLeadDto {
+  @ApiProperty({
+    description: 'Lead image file',
+    type: 'string',
+    format: 'binary',
+    required: false,
+  })
+  image?: any; // File will be handled by Multer
 }

@@ -6,20 +6,14 @@ export class Post {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
-  title: string;
-
   @Column('text')
   content: string;
 
   @Column('simple-array', { nullable: true })
-  images: string[]; // Array of image URLs
+  images: string[]; // Array of S3 image keys
 
   @Column({ nullable: true })
-  video: string; // Video URL
-
-  @Column('simple-array', { nullable: true })
-  tags: string[]; // Hashtags or tags
+  video: string; // S3 video key
 
   @Column({ default: 0 })
   likesCount: number;
@@ -33,14 +27,14 @@ export class Post {
   @Column({ default: 0 })
   viewsCount: number;
 
+  @Column({ default: 0 })
+  savesCount: number; // NEW: Track how many times post was saved
+
   @Column({ default: true })
   isActive: boolean;
 
   @Column({ default: false })
   isDeleted: boolean;
-
-  @Column({ nullable: true })
-  location: string;
 
   @CreateDateColumn()
   createdAt: Date;

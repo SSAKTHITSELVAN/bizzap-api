@@ -1,7 +1,31 @@
 
-// src/modules/leads/leads.controller.ts - Final Version
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+// src/modules/leads/leads.controller.ts
+import { 
+  Controller, 
+  Get, 
+  Post, 
+  Body, 
+  Patch, 
+  Param, 
+  Delete, 
+  UseGuards, 
+  Request,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { 
+  ApiTags, 
+  ApiOperation, 
+  ApiResponse, 
+  ApiBearerAuth, 
+  ApiParam,
+  ApiConsumes,
+  ApiBody 
+} from '@nestjs/swagger';
 import { LeadsService } from './leads.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
@@ -13,99 +37,238 @@ import { JwtAuthGuard } from '../core/guards/jwt-auth.guard';
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
-  @Post()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Create a new lead' })
-  @ApiResponse({ status: 201, description: 'Lead created successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  async create(@Request() req, @Body() createLeadDto: CreateLeadDto) {
+  // ========== PUBLIC ENDPOINTS ==========
+
+  @Get('public')
+  @ApiOperation({ summary: 'Get all active leads (public endpoint)' })
+  @ApiResponse({ status: 200, description: 'Active leads retrieved successfully' })
+  async findAllPublic() {
+    const leads = await this.leadsService.findAll();
     return {
-      message: 'Lead created successfully',
-      data: await this.leadsService.create(req.user.companyId, createLeadDto),
+      message: 'Active leads retrieved successfully',
+      data: leads,
     };
   }
 
-  @Get()
-  @ApiOperation({ summary: 'Get all active leads' })
-  @ApiResponse({ status: 200, description: 'Leads retrieved successfully' })
-  async findAll() {
+  @Get('public/:id')
+  @ApiOperation({ summary: 'Get a single lead by ID (public endpoint)' })
+  @ApiParam({ name: 'id', description: 'Lead UUID' })
+  @ApiResponse({ status: 200, description: 'Lead retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Lead not found' })
+  async findOnePublic(@Param('id') id: string) {
+    const lead = await this.leadsService.findOne(id);
     return {
-      message: 'Leads retrieved successfully',
-      data: await this.leadsService.findAll(),
+      message: 'Lead retrieved successfully',
+      data: lead,
+    };
+  }
+
+  // ========== PROTECTED ENDPOINTS ==========
+
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @UseInterceptors(FileInterceptor('image'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Create a new lead with optional image upload' })
+  @ApiBody({
+    description: 'Lead details with optional image',
+    schema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Lead title',
+          example: 'Looking for Web Development Services',
+        },
+        description: {
+          type: 'string',
+          description: 'Detailed description',
+          example: 'We need a professional website for our startup',
+        },
+        budget: {
+          type: 'string',
+          description: 'Budget for the lead',
+          example: '$5000',
+        },
+        quantity: {
+          type: 'string',
+          description: 'Quantity required',
+          example: '1',
+        },
+        location: {
+          type: 'string',
+          description: 'Location',
+          example: 'San Francisco',
+        },
+        image: {
+          type: 'string',
+          format: 'binary',
+          description: 'Lead image (JPG, PNG, WebP, max 10MB)',
+        },
+      },
+      required: ['title', 'description'],
+    },
+  })
+  @ApiResponse({ status: 201, description: 'Lead created successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async create(
+    @Request() req,
+    @Body() createLeadDto: CreateLeadDto,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }), // 10MB
+          new FileTypeValidator({ fileType: /(image\/(jpeg|jpg|png|webp))/ }),
+        ],
+        fileIsRequired: false,
+      }),
+    )
+    image?: Express.Multer.File,
+  ) {
+    const lead = await this.leadsService.create(req.user.companyId, createLeadDto, image);
+    return {
+      message: 'Lead created successfully',
+      data: lead,
     };
   }
 
   @Get('my-leads')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Get authenticated company leads' })
-  @ApiResponse({ status: 200, description: 'My leads retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiOperation({ summary: 'Get all leads (active + inactive) created by authenticated company' })
+  @ApiResponse({ status: 200, description: 'Company leads retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async findMyLeads(@Request() req) {
+    const leads = await this.leadsService.findByCompany(req.user.companyId);
     return {
-      message: 'My leads retrieved successfully',
-      data: await this.leadsService.findByCompany(req.user.companyId),
+      message: 'Your leads retrieved successfully',
+      data: leads,
+    };
+  }
+
+  @Get('my-leads/active')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get only active leads created by authenticated company' })
+  @ApiResponse({ status: 200, description: 'Active company leads retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async findMyActiveLeads(@Request() req) {
+    const leads = await this.leadsService.findActiveByCompany(req.user.companyId);
+    return {
+      message: 'Your active leads retrieved successfully',
+      data: leads,
+    };
+  }
+
+  @Get('my-leads/inactive')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get only inactive/deactivated leads created by authenticated company' })
+  @ApiResponse({ status: 200, description: 'Inactive company leads retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async findMyInactiveLeads(@Request() req) {
+    const leads = await this.leadsService.findInactiveByCompany(req.user.companyId);
+    return {
+      message: 'Your inactive leads retrieved successfully',
+      data: leads,
     };
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get lead by ID' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get a single lead by ID (protected)' })
   @ApiParam({ name: 'id', description: 'Lead UUID' })
   @ApiResponse({ status: 200, description: 'Lead retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Lead not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async findOne(@Param('id') id: string) {
+    const lead = await this.leadsService.findOne(id);
     return {
       message: 'Lead retrieved successfully',
-      data: await this.leadsService.findOne(id),
-    };
-  }
-
-  @Post(':id/consume')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Consume a lead to get contact information' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiResponse({ status: 200, description: 'Lead consumed successfully or insufficient quota' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Cannot consume your own lead' })
-  async consumeLead(@Param('id') id: string, @Request() req) {
-    const result = await this.leadsService.consumeLead(id, req.user.companyId);
-    return {
-      message: result.success ? 'Lead consumed successfully' : 'Insufficient lead quota',
-      data: result,
+      data: lead,
     };
   }
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Update a lead' })
+  @UseInterceptors(FileInterceptor('image'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Update a lead with optional new image' })
   @ApiParam({ name: 'id', description: 'Lead UUID' })
+  @ApiBody({
+    description: 'Lead update details with optional image',
+    schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', example: 'Updated Lead Title' },
+        description: { type: 'string', example: 'Updated description' },
+        budget: { type: 'string', example: '$6000' },
+        quantity: { type: 'string', example: '2' },
+        location: { type: 'string', example: 'New York' },
+        image: {
+          type: 'string',
+          format: 'binary',
+          description: 'New lead image (replaces existing)',
+        },
+      },
+    },
+  })
   @ApiResponse({ status: 200, description: 'Lead updated successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Can only update your own leads' })
-  async update(@Param('id') id: string, @Request() req, @Body() updateLeadDto: UpdateLeadDto) {
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
+  @ApiResponse({ status: 404, description: 'Lead not found' })
+  async update(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() updateLeadDto: UpdateLeadDto,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }), // 10MB
+          new FileTypeValidator({ fileType: /(image\/(jpeg|jpg|png|webp))/ }),
+        ],
+        fileIsRequired: false,
+      }),
+    )
+    image?: Express.Multer.File,
+  ) {
+    const lead = await this.leadsService.update(id, req.user.companyId, updateLeadDto, image);
     return {
       message: 'Lead updated successfully',
-      data: await this.leadsService.update(id, req.user.companyId, updateLeadDto),
+      data: lead,
     };
   }
 
-  @Patch(':id/status/:isActive')
+  @Patch(':id/toggle-status')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Toggle the active status of a lead' })
+  @ApiOperation({ summary: 'Toggle lead active/inactive status' })
   @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiParam({ name: 'isActive', description: 'Boolean status (true for active, false for inactive)' })
-  @ApiResponse({ status: 200, description: 'Lead status updated successfully' })
+  @ApiBody({
+    description: 'Active status',
+    schema: {
+      type: 'object',
+      properties: {
+        isActive: {
+          type: 'boolean',
+          description: 'Set to true to activate, false to deactivate',
+          example: true,
+        },
+      },
+      required: ['isActive'],
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Lead status toggled successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  async toggleActiveStatus(@Param('id') id: string, @Param('isActive') isActive: string, @Request() req) {
-    const status = isActive.toLowerCase() === 'true';
-    const lead = await this.leadsService.toggleActiveStatus(id, req.user.companyId, status);
+  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
+  async toggleStatus(@Request() req, @Param('id') id: string, @Body('isActive') isActive: boolean) {
+    const lead = await this.leadsService.toggleActiveStatus(id, req.user.companyId, isActive);
     return {
-      message: `Lead has been ${status ? 'activated' : 'deactivated'}`,
+      message: `Lead ${isActive ? 'activated' : 'deactivated'} successfully`,
       data: lead,
     };
   }
@@ -113,15 +276,36 @@ export class LeadsController {
   @Patch(':id/deactivate')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Deactivate a lead with reason' })
+  @ApiOperation({ summary: 'Deactivate a lead with optional reason' })
   @ApiParam({ name: 'id', description: 'Lead UUID' })
+  @ApiBody({
+    description: 'Deactivation reason',
+    schema: {
+      type: 'object',
+      properties: {
+        reasonForDeactivation: {
+          type: 'string',
+          description: 'Reason for deactivating the lead',
+          example: 'Lead fulfilled',
+        },
+      },
+    },
+  })
   @ApiResponse({ status: 200, description: 'Lead deactivated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden' })
-  async deactivateLead(@Param('id') id: string, @Request() req, @Body() deactivateLeadDto: DeactivateLeadDto) {
-    const lead = await this.leadsService.deactivateLeadWithReason(id, req.user.companyId, deactivateLeadDto.reasonForDeactivation);
+  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
+  async deactivate(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() deactivateDto: DeactivateLeadDto,
+  ) {
+    const lead = await this.leadsService.deactivateLeadWithReason(
+      id,
+      req.user.companyId,
+      deactivateDto.reasonForDeactivation,
+    );
     return {
-      message: 'Lead has been deactivated',
+      message: 'Lead deactivated successfully',
       data: lead,
     };
   }
@@ -129,16 +313,54 @@ export class LeadsController {
   @Delete(':id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Delete a lead' })
+  @ApiOperation({ summary: 'Delete a lead (soft delete)' })
   @ApiParam({ name: 'id', description: 'Lead UUID' })
   @ApiResponse({ status: 200, description: 'Lead deleted successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Can only delete your own leads' })
-  async remove(@Param('id') id: string, @Request() req) {
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
+  async remove(@Request() req, @Param('id') id: string) {
     await this.leadsService.remove(id, req.user.companyId);
     return {
       message: 'Lead deleted successfully',
       data: null,
+    };
+  }
+
+  @Post(':id/consume')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Consume a lead to get contact details' })
+  @ApiParam({ name: 'id', description: 'Lead UUID' })
+  @ApiResponse({ status: 200, description: 'Lead consumed successfully or insufficient quota' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Cannot consume own lead or insufficient leads' })
+  async consumeLead(@Request() req, @Param('id') id: string) {
+    const result = await this.leadsService.consumeLead(id, req.user.companyId);
+    if (!result.success) {
+      return {
+        message: 'Insufficient leads to consume',
+        data: null,
+      };
+    }
+    return {
+      message: 'Lead consumed successfully',
+      data: { contact: result.contact },
+    };
+  }
+
+  @Get(':id/image')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get signed URL for lead image' })
+  @ApiParam({ name: 'id', description: 'Lead UUID' })
+  @ApiResponse({ status: 200, description: 'Image URL generated successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Lead or image not found' })
+  async getLeadImage(@Param('id') id: string) {
+    const imageUrl = await this.leadsService.getLeadImageUrl(id);
+    return {
+      message: 'Image URL generated successfully',
+      data: { imageUrl },
     };
   }
 }
