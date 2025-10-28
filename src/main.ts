@@ -1,6 +1,4 @@
-
-
-// src/main.ts - Updated with Chat tag
+// src/main.ts - Updated with organized Swagger configuration
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -14,7 +12,7 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.enableCors();
 
-  // Swagger configuration
+  // Swagger configuration with organized tags
   const config = new DocumentBuilder()
     .setTitle('Bizzap API')
     .setDescription('Business networking platform API with leads, products, and company management')
@@ -30,24 +28,43 @@ async function bootstrap() {
       },
       'JWT-auth',
     )
-    .addTag('Auth', 'Authentication endpoints')
-    .addTag('Companies', 'Company management')
-    .addTag('Leads', 'Lead management')
-    .addTag('Products', 'Product management')
-    .addTag('Followers', 'Company follow system')
-    .addTag('Search', 'Search functionality')
-    .addTag('Chat', 'Real-time chat system')
+    // Core functionality tags
+    .addTag('Auth', 'Authentication and authorization endpoints')
+    .addTag('Companies', 'Company profile and management')
+    .addTag('Leads', 'Lead creation, consumption, and management')
+    .addTag('Products', 'Product catalog management')
+    .addTag('Posts', 'Social posts, comments, likes, and saves')
+    
+    // Social features tags
+    .addTag('Followers', 'Company follow/unfollow system')
+    .addTag('Chat', 'Real-time messaging between companies')
+    
+    // Utility tags
+    .addTag('Search', 'Global search functionality')
+    .addTag('Subscription', 'Subscription plans and billing')
+    
+    // Admin tags
+    .addTag('Admin-Leads', 'Admin-only lead metrics and management')
+    .addTag('Admin-Companies', 'Admin-only company management')
+    .addTag('Admin-Products', 'Admin-only product management')
+    .addTag('Admin-Posts', 'Admin-only posts management')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document, {
     swaggerOptions: {
       persistAuthorization: true,
+      tagsSorter: 'alpha', // Sort tags alphabetically
+      operationsSorter: 'alpha', // Sort operations alphabetically within tags
+      docExpansion: 'none', // Collapse all sections by default
+      filter: true, // Enable search/filter
+      displayRequestDuration: true, // Show request duration
     },
   });
   
-  await app.listen(3001);
-  console.log('Application is running on: http://localhost:3000');
-  console.log('Swagger UI is available at: http://localhost:3000/api/docs');
+  const PORT = process.env.PORT || 3001;
+  await app.listen(PORT);
+  console.log(`Application is running on: http://localhost:${PORT}`);
+  console.log(`Swagger UI is available at: http://localhost:${PORT}/api/docs`);
 }
 bootstrap();

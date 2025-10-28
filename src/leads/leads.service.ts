@@ -1,5 +1,5 @@
-// src/modules/leads/leads.service.ts
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+// src/modules/leads/leads.service.ts (Updated with Posting Quota Check - FIXED)
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Lead } from './entities/lead.entity';
@@ -25,6 +25,12 @@ export class LeadsService {
     createLeadDto: CreateLeadDto, 
     imageFile?: Express.Multer.File
   ): Promise<Lead> {
+    // Check if company can post more leads
+    const canPost = await this.companyService.canPostLead(companyId);
+    if (!canPost) {
+      throw new BadRequestException('Lead posting quota exceeded. Please upgrade your subscription or wait for next month.');
+    }
+
     const leadData: Partial<Lead> = {
       ...createLeadDto,
       companyId,
@@ -46,6 +52,9 @@ export class LeadsService {
 
     const lead = this.leadRepository.create(leadData);
     const savedLead = await this.leadRepository.save(lead);
+    
+    // Increment posted leads count
+    await this.companyService.incrementPostedLeads(companyId);
     
     // Generate signed URL for response
     if (savedLead.imageKey) {

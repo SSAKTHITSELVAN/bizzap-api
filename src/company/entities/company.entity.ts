@@ -1,9 +1,11 @@
-// src/modules/company/entities/company.entity.ts
+// src/modules/company/entities/company.entity.ts (Updated)
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
 import { Lead } from '../../leads/entities/lead.entity';
 import { Product } from '../../products/entities/product.entity';
 import { Follower } from '../../followers/entities/follower.entity';
 import { Post } from '../../posts/entities/post.entity';
+import { Subscription } from './subscription.entity';
+import { PaymentHistory } from './payment-history.entity';
 
 @Entity('companies')
 export class Company {
@@ -34,17 +36,31 @@ export class Company {
   @Column({ unique: true })
   referralCode: string;
 
+  // Legacy fields (kept for backward compatibility)
   @Column({ default: 10 })
   leadQuota: number;
 
   @Column({ default: 0 })
   consumedLeads: number;
 
+  // New subscription tracking fields
+  @Column({ default: 30 })
+  postingQuota: number;
+
   @Column({ default: 0 })
-  followersCount: number;
+  postedLeads: number;
+
+  @Column({ default: 'FREEMIUM' })
+  currentTier: string;
+
+  @Column({ default: false })
+  hasVerifiedBadge: boolean;
 
   @Column({ default: false })
   isDeleted: boolean;
+
+  @Column({ default: 0 })
+  followersCount: number;
 
   @CreateDateColumn()
   createdAt: Date;
@@ -87,4 +103,10 @@ export class Company {
 
   @OneToMany(() => Post, (post) => post.company)
   posts: Post[];
+
+  @OneToMany(() => Subscription, (subscription) => subscription.company)
+  subscriptions: Subscription[];
+
+  @OneToMany(() => PaymentHistory, (payment) => payment.company)
+  paymentHistory: PaymentHistory[];
 }
