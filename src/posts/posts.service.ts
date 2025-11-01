@@ -312,15 +312,27 @@ export class PostsService {
       throw new NotFoundException('Comment could not be retrieved after creation');
     }
 
+    // Generate signed URLs for company assets in the comment
+    await this.generateSignedUrlsForCompany(savedComment.company);
+
     return savedComment;
   }
 
   async getComments(postId: string): Promise<PostComment[]> {
-    return this.postCommentRepository.find({
+    const comments = await this.postCommentRepository.find({
       where: { postId, isDeleted: false },
       relations: ['company'],
       order: { createdAt: 'DESC' },
     });
+
+    // Generate signed URLs for each comment's company assets
+    for (const comment of comments) {
+      if (comment.company) {
+        await this.generateSignedUrlsForCompany(comment.company);
+      }
+    }
+
+    return comments;
   }
 
   async deleteComment(commentId: string, companyId: string): Promise<void> {
@@ -412,11 +424,44 @@ export class PostsService {
     return this.generateSignedUrlsForPosts(posts);
   }
 
+  /**
+   * 🔧 FIXED: Generate signed URLs for company assets
+   * This helper method generates signed URLs for company logo, userPhoto, and coverImage
+   */
+  private async generateSignedUrlsForCompany(company: any): Promise<void> {
+    if (!company) return;
+
+    try {
+      // Generate signed URL for company logo
+      if (company.logo && this.s3Service.isS3Key(company.logo)) {
+        company.logo = await this.s3Service.generateSignedUrl(company.logo, 3600);
+      }
+
+      // Generate signed URL for user photo
+      if (company.userPhoto && this.s3Service.isS3Key(company.userPhoto)) {
+        company.userPhoto = await this.s3Service.generateSignedUrl(company.userPhoto, 3600);
+      }
+
+      // Generate signed URL for cover image
+      if (company.coverImage && this.s3Service.isS3Key(company.coverImage)) {
+        company.coverImage = await this.s3Service.generateSignedUrl(company.coverImage, 3600);
+      }
+    } catch (error) {
+      console.error(`Failed to generate signed URLs for company ${company.id}:`, error);
+      // Don't throw - continue with S3 keys if signed URL generation fails
+    }
+  }
+
+  /**
+   * 🔧 FIXED: Generate signed URLs for posts AND company assets
+   * Now includes company logo, userPhoto, and coverImage signed URLs
+   */
   private async generateSignedUrlsForPosts(posts: Post[]): Promise<Post[]> {
     return Promise.all(
       posts.map(async (post) => {
         const postObj = { ...post };
 
+        // Generate signed URLs for post media (images and video)
         if (post.images && post.images.length > 0) {
           try {
             postObj.images = await Promise.all(
@@ -433,6 +478,11 @@ export class PostsService {
           } catch (error) {
             console.error(`Failed to generate signed URL for post ${post.id} video:`, error);
           }
+        }
+
+        // 🆕 Generate signed URLs for company assets
+        if (postObj.company) {
+          await this.generateSignedUrlsForCompany(postObj.company);
         }
 
         return postObj;

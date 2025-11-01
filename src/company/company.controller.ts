@@ -1,6 +1,18 @@
-// src/modules/company/company.controller.ts (Updated with Subscription)
-import { Controller, Get, Post, Body, Patch, Param, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+// src/modules/company/company.controller.ts - UPDATED WITH FILE UPLOAD
+import { 
+  Controller, 
+  Get, 
+  Post, 
+  Body, 
+  Patch, 
+  Param, 
+  UseGuards, 
+  Request,
+  UseInterceptors,
+  UploadedFiles 
+} from '@nestjs/common';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { CompanyService } from './company.service';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
@@ -27,10 +39,13 @@ export class CompanyController {
     const company = await this.companyService.findOne(req.user.companyId);
     const subscription = await this.companyService.getActiveSubscription(req.user.companyId);
     
+    // Generate signed URLs for S3 assets
+    const companyWithUrls = await this.companyService.getCompanyWithSignedUrls(company);
+    
     return {
       message: 'Company profile retrieved successfully',
       data: {
-        ...company,
+        ...companyWithUrls,
         subscription,
       },
     };
@@ -180,22 +195,53 @@ export class CompanyController {
   @ApiResponse({ status: 200, description: 'Company retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Company not found' })
   async findOne(@Param('id') id: string) {
+    const company = await this.companyService.findOne(id);
+    const companyWithUrls = await this.companyService.getCompanyWithSignedUrls(company);
+    
     return {
       message: 'Company retrieved successfully',
-      data: await this.companyService.findOne(id),
+      data: companyWithUrls,
     };
   }
 
   @Patch('profile')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Update authenticated company profile' })
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'userPhoto', maxCount: 1 },
+      { name: 'logo', maxCount: 1 },
+      { name: 'coverImage', maxCount: 1 },
+    ])
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ 
+    summary: 'Update authenticated company profile with file uploads',
+    description: 'Update profile with optional file uploads for user photo, logo, and cover image'
+  })
   @ApiResponse({ status: 200, description: 'Company profile updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  async updateProfile(@Request() req, @Body() updateCompanyDto: UpdateCompanyDto) {
+  async updateProfile(
+    @Request() req, 
+    @Body() updateCompanyDto: UpdateCompanyDto,
+    @UploadedFiles() files?: { 
+      userPhoto?: Express.Multer.File[], 
+      logo?: Express.Multer.File[],
+      coverImage?: Express.Multer.File[]
+    }
+  ) {
+    const updatedCompany = await this.companyService.updateWithFiles(
+      req.user.companyId, 
+      updateCompanyDto,
+      files
+    );
+    
+    // Generate signed URLs for response
+    const companyWithUrls = await this.companyService.getCompanyWithSignedUrls(updatedCompany);
+    
     return {
       message: 'Company profile updated successfully',
-      data: await this.companyService.update(req.user.companyId, updateCompanyDto),
+      data: companyWithUrls,
     };
   }
 }

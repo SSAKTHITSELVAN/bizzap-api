@@ -1,8 +1,15 @@
-// src/chat/services/s3.service.ts
+// src/chat/services/s3.service.ts - EXTENDED VERSION
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { S3 } from 'aws-sdk';
 import { v4 as uuidv4 } from 'uuid';
+
+export enum AssetType {
+  COMPANY_LOGO = 'company-logos',
+  USER_PHOTO = 'user-photos',
+  COVER_IMAGE = 'cover-images',
+  CHAT_FILE = 'chat-files',
+}
 
 @Injectable()
 export class S3Service {
@@ -23,6 +30,12 @@ export class S3Service {
     this.bucketName = bucketName;
   }
 
+  /**
+   * Upload file to S3 with specified folder
+   * @param file - Multer file object
+   * @param folder - S3 folder path or AssetType enum
+   * @returns Object with S3 key, size, and mimeType
+   */
   async uploadFile(file: Express.Multer.File, folder: string = 'chat-files'): Promise<{
     url: string;
     key: string;
@@ -55,6 +68,55 @@ export class S3Service {
     }
   }
 
+  /**
+   * Upload company logo to S3
+   * Validates image file and enforces size limits
+   */
+  async uploadCompanyLogo(file: Express.Multer.File): Promise<string> {
+    this.validateImageFile(file);
+    const result = await this.uploadFile(file, AssetType.COMPANY_LOGO);
+    return result.key; // Return S3 key, not full URL
+  }
+
+  /**
+   * Upload user photo to S3
+   */
+  async uploadUserPhoto(file: Express.Multer.File): Promise<string> {
+    this.validateImageFile(file);
+    const result = await this.uploadFile(file, AssetType.USER_PHOTO);
+    return result.key;
+  }
+
+  /**
+   * Upload cover image to S3
+   */
+  async uploadCoverImage(file: Express.Multer.File): Promise<string> {
+    this.validateImageFile(file);
+    const result = await this.uploadFile(file, AssetType.COVER_IMAGE);
+    return result.key;
+  }
+
+  /**
+   * Validate that file is an image and within size limits
+   */
+  private validateImageFile(file: Express.Multer.File): void {
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new Error('Invalid file type. Only JPEG, PNG, and WebP images are allowed');
+    }
+
+    if (file.size > maxSize) {
+      throw new Error('File size exceeds 5MB limit');
+    }
+  }
+
+  /**
+   * Generate signed URL for private S3 files
+   * @param key - S3 key (path)
+   * @param expiresIn - Expiration time in seconds (default 1 hour)
+   */
   async generateSignedUrl(key: string, expiresIn: number = 3600): Promise<string> {
     try {
       return this.s3.getSignedUrl('getObject', {
@@ -68,6 +130,9 @@ export class S3Service {
     }
   }
 
+  /**
+   * Delete file from S3
+   */
   async deleteFile(key: string): Promise<void> {
     try {
       await this.s3.deleteObject({
@@ -78,6 +143,43 @@ export class S3Service {
       console.error('S3 Delete Error:', error);
       throw new Error(`Failed to delete file from S3: ${error.message}`);
     }
+  }
+
+  /**
+   * Check if a string is an S3 key (not a full URL)
+   * S3 keys follow pattern: folder/uuid.extension
+   */
+  isS3Key(path: string): boolean {
+    if (!path) return false;
+    
+    // If it's a full URL (http/https), it's not an S3 key
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return false;
+    }
+    
+    // Check if it matches our S3 key pattern: folder/uuid.ext
+    const s3KeyPattern = /^(company-logos|user-photos|cover-images|chat-files)\/.+\..+$/;
+    return s3KeyPattern.test(path);
+  }
+
+  /**
+   * Generate signed URL if path is S3 key, otherwise return as-is
+   * This ensures backward compatibility with existing URL strings
+   */
+  async getAccessibleUrl(path: string | null | undefined, expiresIn: number = 3600): Promise<string | null> {
+    if (!path) return null;
+    
+    if (this.isS3Key(path)) {
+      try {
+        return await this.generateSignedUrl(path, expiresIn);
+      } catch (error) {
+        console.error(`Failed to generate signed URL for ${path}:`, error);
+        return null;
+      }
+    }
+    
+    // Return existing URL as-is (backward compatibility)
+    return path;
   }
 
   async generateThumbnail(file: Express.Multer.File): Promise<string | null> {

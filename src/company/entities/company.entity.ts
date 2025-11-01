@@ -1,4 +1,4 @@
-// src/modules/company/entities/company.entity.ts (Updated)
+// src/modules/company/entities/company.entity.ts (Updated with Permanent Quota Tracking)
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
 import { Lead } from '../../leads/entities/lead.entity';
 import { Product } from '../../products/entities/product.entity';
@@ -36,14 +36,18 @@ export class Company {
   @Column({ unique: true })
   referralCode: string;
 
-  // Legacy fields (kept for backward compatibility)
+  // 🆕 NEW: Permanent lead quota (referrals + pay-as-you-go + monthly free)
+  // This quota NEVER resets and persists across subscription changes
+  @Column({ default: 10 })
+  permanentLeadQuota: number;
+
+  // Total lead quota (permanent + subscription quota)
   @Column({ default: 10 })
   leadQuota: number;
 
   @Column({ default: 0 })
   consumedLeads: number;
 
-  // New subscription tracking fields
   @Column({ default: 30 })
   postingQuota: number;
 

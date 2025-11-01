@@ -1,6 +1,6 @@
 // src/modules/company/razorpay.service.ts
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import Razorpay from 'razorpay'; // Changed from * as Razorpay
+import Razorpay from 'razorpay';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 
@@ -68,6 +68,16 @@ export class RazorpayService {
     });
   }
 
+  /**
+   * Generate a short receipt ID (max 40 chars)
+   * Format: prefix_timestamp_random (e.g., "sub_1698765432_a1b2c3")
+   */
+  private generateReceiptId(prefix: string): string {
+    const timestamp = Date.now().toString();
+    const random = Math.random().toString(36).substring(2, 8); // 6 chars
+    return `${prefix}_${timestamp}_${random}`.substring(0, 40);
+  }
+
   getPlanDetails(tier: string): SubscriptionPlan {
     return this.subscriptionPlans[tier];
   }
@@ -76,11 +86,19 @@ export class RazorpayService {
     return this.subscriptionPlans;
   }
 
+  /**
+   * Create a Razorpay order with proper receipt length validation
+   */
   async createOrder(amount: number, currency: string = 'INR', receipt?: string): Promise<any> {
+    // If receipt provided, truncate to 40 chars; otherwise generate one
+    const finalReceipt = receipt 
+      ? receipt.substring(0, 40)
+      : this.generateReceiptId('order');
+    
     const options = {
       amount,
       currency,
-      receipt: receipt || `receipt_${Date.now()}`,
+      receipt: finalReceipt,
     };
     
     return this.razorpay.orders.create(options);

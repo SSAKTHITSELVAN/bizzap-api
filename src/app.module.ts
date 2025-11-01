@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { typeOrmConfig } from './database/typeorm.config';
+import { ScheduleModule } from '@nestjs/schedule';
 
 // Modules
 import { AuthModule } from './auth/auth.module';
@@ -25,6 +26,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
       secret: process.env.JWT_SECRET || 'bizzap-secret-key',
       signOptions: { expiresIn: '30d' },
     }),
+    ScheduleModule.forRoot(),
     AuthModule,
     CompanyModule,
     LeadsModule,

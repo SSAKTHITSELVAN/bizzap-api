@@ -1,5 +1,5 @@
-// src/modules/auth/dto/register.dto.ts
-import { IsString, IsNotEmpty, IsPhoneNumber, Length } from 'class-validator';
+// src/modules/auth/dto/register.dto.ts - UPDATED WITH COVER IMAGE
+import { IsString, IsNotEmpty, IsPhoneNumber, Length, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RegisterDto {
@@ -13,7 +13,7 @@ export class RegisterDto {
 
   @ApiProperty({
     description: '6-digit OTP code',
-    example: '123456',
+    example: '936180',
     minLength: 6,
     maxLength: 6,
   })
@@ -47,20 +47,31 @@ export class RegisterDto {
   userName: string;
 
   @ApiProperty({
-    description: 'URL to the user\'s profile photo',
+    description: 'URL to the user\'s profile photo (ignored if file is uploaded)',
     example: 'https://example.com/user.jpg',
+    required: false,
   })
   @IsString()
-  @IsNotEmpty()
-  userPhoto: string;
+  @IsOptional()
+  userPhoto?: string;
 
   @ApiProperty({
-    description: 'Company logo URL',
+    description: 'Company logo URL (ignored if file is uploaded)',
     example: 'https://example.com/logo.png',
+    required: false,
   })
   @IsString()
-  @IsNotEmpty()
-  logo: string;
+  @IsOptional()
+  logo?: string;
+
+  @ApiProperty({
+    description: 'Company cover image URL (ignored if file is uploaded)',
+    example: 'https://example.com/cover.jpg',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  coverImage?: string;
 
   @ApiProperty({
     description: 'Company address',
@@ -68,6 +79,7 @@ export class RegisterDto {
     required: false,
   })
   @IsString()
+  @IsOptional()
   address?: string;
 
   @ApiProperty({
@@ -76,6 +88,7 @@ export class RegisterDto {
     required: false,
   })
   @IsString()
+  @IsOptional()
   description?: string;
 
   @ApiProperty({
@@ -84,5 +97,15 @@ export class RegisterDto {
     required: false,
   })
   @IsString()
+  @IsOptional()
   referredBy?: string;
+
+  @ApiProperty({
+    description: 'Company business category',
+    example: 'IT Services',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  category?: string;
 }

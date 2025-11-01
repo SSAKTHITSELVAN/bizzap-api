@@ -1,4 +1,4 @@
-// src/modules/leads/leads.service.ts (Updated with Posting Quota Check - FIXED)
+// src/modules/leads/leads.service.ts (Updated with Company Asset Signed URLs)
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -75,7 +75,7 @@ export class LeadsService {
       order: { createdAt: 'DESC' },
     });
 
-    return await this.attachImageUrls(leads);
+    return await this.attachSignedUrls(leads);
   }
 
   async findByCompany(companyId: string): Promise<Lead[]> {
@@ -85,7 +85,7 @@ export class LeadsService {
       order: { createdAt: 'DESC' },
     });
 
-    return await this.attachImageUrls(leads);
+    return await this.attachSignedUrls(leads);
   }
 
   async findActiveByCompany(companyId: string): Promise<Lead[]> {
@@ -94,7 +94,7 @@ export class LeadsService {
       relations: ['company'],
       order: { createdAt: 'DESC' },
     });
-    return await this.attachImageUrls(leads);
+    return await this.attachSignedUrls(leads);
   }
 
   async findInactiveByCompany(companyId: string): Promise<Lead[]> {
@@ -103,7 +103,7 @@ export class LeadsService {
       relations: ['company'],
       order: { updatedAt: 'DESC' },
     });
-    return await this.attachImageUrls(leads);
+    return await this.attachSignedUrls(leads);
   }
 
   async findOne(id: string): Promise<Lead> {
@@ -120,16 +120,9 @@ export class LeadsService {
     lead.viewCount += 1;
     const updatedLead = await this.leadRepository.save(lead);
 
-    // Generate signed URL for image
-    if (updatedLead.imageKey) {
-      try {
-        updatedLead.imageUrl = await this.s3Service.generateSignedUrl(updatedLead.imageKey);
-      } catch (error) {
-        console.error(`Failed to generate signed URL for lead ${updatedLead.id}:`, error);
-      }
-    }
-
-    return updatedLead;
+    // Generate signed URLs for lead image AND company assets
+    const [leadWithUrls] = await this.attachSignedUrls([updatedLead]);
+    return leadWithUrls;
   }
 
   async update(
@@ -179,16 +172,9 @@ export class LeadsService {
     
     const updatedLead = await this.leadRepository.save(lead);
 
-    // Generate signed URL for image
-    if (updatedLead.imageKey) {
-      try {
-        updatedLead.imageUrl = await this.s3Service.generateSignedUrl(updatedLead.imageKey);
-      } catch (error) {
-        console.error('Failed to generate signed URL:', error);
-      }
-    }
-
-    return updatedLead;
+    // Generate signed URLs for lead image AND company assets
+    const [leadWithUrls] = await this.attachSignedUrls([updatedLead]);
+    return leadWithUrls;
   }
 
   async toggleActiveStatus(id: string, companyId: string, isActive: boolean): Promise<Lead> {
@@ -214,16 +200,9 @@ export class LeadsService {
     
     const savedLead = await this.leadRepository.save(lead);
     
-    // Generate signed URL for image
-    if (savedLead.imageKey) {
-      try {
-        savedLead.imageUrl = await this.s3Service.generateSignedUrl(savedLead.imageKey);
-      } catch (error) {
-        console.error('Failed to generate signed URL:', error);
-      }
-    }
-    
-    return savedLead;
+    // Generate signed URLs
+    const [leadWithUrls] = await this.attachSignedUrls([savedLead]);
+    return leadWithUrls;
   }
 
   async deactivateLeadWithReason(id: string, companyId: string, reason?: string): Promise<Lead> {
@@ -245,16 +224,9 @@ export class LeadsService {
     
     const savedLead = await this.leadRepository.save(lead);
     
-    // Generate signed URL for image
-    if (savedLead.imageKey) {
-      try {
-        savedLead.imageUrl = await this.s3Service.generateSignedUrl(savedLead.imageKey);
-      } catch (error) {
-        console.error('Failed to generate signed URL:', error);
-      }
-    }
-    
-    return savedLead;
+    // Generate signed URLs
+    const [leadWithUrls] = await this.attachSignedUrls([savedLead]);
+    return leadWithUrls;
   }
 
   async remove(id: string, companyId: string): Promise<void> {
@@ -341,17 +313,55 @@ export class LeadsService {
     };
   }
 
-  // Helper method to attach signed URLs to leads
-  private async attachImageUrls(leads: Lead[]): Promise<Lead[]> {
+  /**
+   * 🔧 NEW: Generate signed URLs for company assets
+   * This helper method generates signed URLs for company logo, userPhoto, and coverImage
+   */
+  private async generateSignedUrlsForCompany(company: any): Promise<void> {
+    if (!company) return;
+
+    try {
+      // Generate signed URL for company logo
+      if (company.logo && this.s3Service.isS3Key(company.logo)) {
+        company.logo = await this.s3Service.generateSignedUrl(company.logo, 3600);
+      }
+
+      // Generate signed URL for user photo
+      if (company.userPhoto && this.s3Service.isS3Key(company.userPhoto)) {
+        company.userPhoto = await this.s3Service.generateSignedUrl(company.userPhoto, 3600);
+      }
+
+      // Generate signed URL for cover image
+      if (company.coverImage && this.s3Service.isS3Key(company.coverImage)) {
+        company.coverImage = await this.s3Service.generateSignedUrl(company.coverImage, 3600);
+      }
+    } catch (error) {
+      console.error(`Failed to generate signed URLs for company ${company.id}:`, error);
+      // Don't throw - continue with S3 keys if signed URL generation fails
+    }
+  }
+
+  /**
+   * 🔧 UPDATED: Generate signed URLs for lead images AND company assets
+   * Now includes company logo, userPhoto, and coverImage signed URLs
+   */
+  private async attachSignedUrls(leads: Lead[]): Promise<Lead[]> {
     const leadsWithUrls = await Promise.all(
       leads.map(async (lead) => {
+        // Generate signed URL for lead image
         if (lead.imageKey) {
           try {
-            lead.imageUrl = await this.s3Service.generateSignedUrl(lead.imageKey);
+            lead.imageUrl = await this.s3Service.generateSignedUrl(lead.imageKey, 3600);
           } catch (error) {
             console.error(`Failed to generate signed URL for lead ${lead.id}:`, error);
           }
         }
+
+        // 🆕 Generate signed URLs for company assets
+        if (lead.company) {
+          await this.generateSignedUrlsForCompany(lead.company);
+        }
+
         return lead;
       })
     );
@@ -378,7 +388,7 @@ export class LeadsService {
       relations: ['company'],
       order: { updatedAt: 'DESC' },
     });
-    return await this.attachImageUrls(leads);
+    return await this.attachSignedUrls(leads);
   }
 
   async getDeletedLeads(): Promise<Lead[]> {
@@ -387,6 +397,12 @@ export class LeadsService {
       relations: ['company'],
       order: { updatedAt: 'DESC' },
     });
+    // Generate signed URLs for company assets even for deleted leads
+    for (const lead of leads) {
+      if (lead.company) {
+        await this.generateSignedUrlsForCompany(lead.company);
+      }
+    }
     return leads;
   }
 
@@ -464,7 +480,7 @@ export class LeadsService {
       take: limit,
       relations: ['company'],
     });
-    return await this.attachImageUrls(leads);
+    return await this.attachSignedUrls(leads);
   }
   
   async getMostViewedLeads(limit: number = 10): Promise<Lead[]> {
@@ -474,7 +490,7 @@ export class LeadsService {
       take: limit,
       relations: ['company'],
     });
-    return await this.attachImageUrls(leads);
+    return await this.attachSignedUrls(leads);
   }
   
   async getLeadsByLocation(): Promise<any[]> {

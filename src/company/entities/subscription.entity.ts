@@ -1,4 +1,4 @@
-// src/modules/company/entities/subscription.entity.ts
+// src/modules/company/entities/subscription.entity.ts (Updated with Permanent Quota Tracking)
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Company } from './company.entity';
 
@@ -53,6 +53,17 @@ export class Subscription {
   @Column({ type: 'timestamp', nullable: true })
   endDate: Date;
 
+  // 🆕 NEW: Track permanent quota (referrals + pay-as-you-go + monthly free)
+  // This never resets and carries over across subscriptions
+  @Column({ default: 0 })
+  permanentLeadQuota: number;
+
+  // 🆕 NEW: Track subscription-specific quota
+  // This is what gets removed when subscription expires
+  @Column({ default: 0 })
+  subscriptionLeadQuota: number;
+
+  // Total lead quota (permanent + subscription)
   @Column({ default: 0 })
   leadQuota: number;
 

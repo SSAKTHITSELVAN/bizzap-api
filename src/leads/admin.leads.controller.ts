@@ -33,7 +33,7 @@ import { JwtAuthGuard } from '../core/guards/jwt-auth.guard';
 
 @ApiTags('Leads')
 @Controller('leads')
-export class LeadsController {
+export class AdminLeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
   // ========== PUBLIC ENDPOINTS ==========
