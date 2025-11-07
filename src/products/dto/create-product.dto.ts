@@ -1,6 +1,7 @@
-// src/modules/products/dto/create-product.dto.ts - Updated with Swagger decorators
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsNumber } from 'class-validator';
+// src/modules/products/dto/create-product.dto.ts
+import { IsString, IsNotEmpty, IsOptional, IsNumber } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateProductDto {
   @ApiProperty({
@@ -20,22 +21,12 @@ export class CreateProductDto {
   description: string;
 
   @ApiProperty({
-    description: 'Array of product image URLs',
-    example: ['https://example.com/image1.jpg', 'https://example.com/image2.jpg'],
-    required: false,
-    type: [String],
-  })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  images?: string[];
-
-  @ApiProperty({
     description: 'Product price',
     example: 25000.00,
     required: false,
   })
   @IsOptional()
+  @Type(() => Number) // ✅ Transform string to number
   @IsNumber()
   price?: number;
 

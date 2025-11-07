@@ -1,15 +1,28 @@
-
 // src/modules/company/dto/update-company.dto.ts
-import { PartialType } from '@nestjs/mapped-types';
+import { PartialType, OmitType } from '@nestjs/mapped-types';
 import { CreateCompanyDto } from './create-company.dto';
 import { IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-export class UpdateCompanyDto extends PartialType(CreateCompanyDto) {
+// Omit immutable fields from CreateCompanyDto
+export class UpdateCompanyDto extends PartialType(
+  OmitType(CreateCompanyDto, ['phoneNumber', 'gstNumber', 'referralCode', 'referredBy'] as const)
+) {
   @ApiProperty({
-    description: 'Company logo URL',
+    description: 'Company name',
+    example: 'Tech Solutions Pvt Ltd',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  companyName?: string;
+
+  @ApiProperty({
+    description: 'Company logo URL or file',
     example: 'https://example.com/logo.png',
     required: false,
+    type: 'string',
+    format: 'binary',
   })
   @IsOptional()
   @IsString()
@@ -35,7 +48,7 @@ export class UpdateCompanyDto extends PartialType(CreateCompanyDto) {
 
   @ApiProperty({
     description: 'Company business category',
-    example: 'Fintech',
+    example: 'IT Services',
     required: false,
   })
   @IsOptional()
@@ -52,18 +65,22 @@ export class UpdateCompanyDto extends PartialType(CreateCompanyDto) {
   userName?: string;
 
   @ApiProperty({
-    description: 'URL to the user\'s profile photo',
+    description: 'User profile photo URL or file',
     example: 'https://example.com/user-new.jpg',
     required: false,
+    type: 'string',
+    format: 'binary',
   })
   @IsOptional()
   @IsString()
   userPhoto?: string;
 
   @ApiProperty({
-    description: 'URL to the company\'s cover image',
+    description: 'Company cover image URL or file',
     example: 'https://example.com/cover-new.jpg',
     required: false,
+    type: 'string',
+    format: 'binary',
   })
   @IsOptional()
   @IsString()

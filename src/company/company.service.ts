@@ -138,6 +138,57 @@ export class CompanyService {
     return companyObj;
   }
 
+  // async updateWithFiles(
+  //   id: string,
+  //   updateCompanyDto: UpdateCompanyDto,
+  //   files?: {
+  //     userPhoto?: Express.Multer.File[],
+  //     logo?: Express.Multer.File[],
+  //     coverImage?: Express.Multer.File[]
+  //   }
+  // ): Promise<Company> {
+  //   const company = await this.findOne(id);
+  //   const oldKeys: string[] = [];
+
+  //   try {
+  //     if (files?.userPhoto?.[0]) {
+  //       if (company.userPhoto && this.s3Service.isS3Key(company.userPhoto)) {
+  //         oldKeys.push(company.userPhoto);
+  //       }
+  //       updateCompanyDto.userPhoto = await this.s3Service.uploadUserPhoto(files.userPhoto[0]);
+  //     }
+
+  //     if (files?.logo?.[0]) {
+  //       if (company.logo && this.s3Service.isS3Key(company.logo)) {
+  //         oldKeys.push(company.logo);
+  //       }
+  //       updateCompanyDto.logo = await this.s3Service.uploadCompanyLogo(files.logo[0]);
+  //     }
+
+  //     if (files?.coverImage?.[0]) {
+  //       if (company.coverImage && this.s3Service.isS3Key(company.coverImage)) {
+  //         oldKeys.push(company.coverImage);
+  //       }
+  //       updateCompanyDto.coverImage = await this.s3Service.uploadCoverImage(files.coverImage[0]);
+  //     }
+
+  //     Object.assign(company, updateCompanyDto);
+  //     const savedCompany = await this.companyRepository.save(company);
+
+  //     for (const key of oldKeys) {
+  //       try {
+  //         await this.s3Service.deleteFile(key);
+  //       } catch (error) {
+  //         console.error(`Failed to delete old file ${key}:`, error);
+  //       }
+  //     }
+
+  //     return savedCompany;
+  //   } catch (error) {
+  //     throw new BadRequestException(`Failed to update profile: ${error.message}`);
+  //   }
+  // }
+
   async updateWithFiles(
     id: string,
     updateCompanyDto: UpdateCompanyDto,
@@ -151,30 +202,44 @@ export class CompanyService {
     const oldKeys: string[] = [];
 
     try {
+      // Only update userPhoto if a new file is uploaded
       if (files?.userPhoto?.[0]) {
         if (company.userPhoto && this.s3Service.isS3Key(company.userPhoto)) {
           oldKeys.push(company.userPhoto);
         }
         updateCompanyDto.userPhoto = await this.s3Service.uploadUserPhoto(files.userPhoto[0]);
+      } else {
+        // Remove userPhoto from DTO to preserve existing value
+        delete updateCompanyDto.userPhoto;
       }
 
+      // Only update logo if a new file is uploaded
       if (files?.logo?.[0]) {
         if (company.logo && this.s3Service.isS3Key(company.logo)) {
           oldKeys.push(company.logo);
         }
         updateCompanyDto.logo = await this.s3Service.uploadCompanyLogo(files.logo[0]);
+      } else {
+        // Remove logo from DTO to preserve existing value
+        delete updateCompanyDto.logo;
       }
 
+      // Only update coverImage if a new file is uploaded
       if (files?.coverImage?.[0]) {
         if (company.coverImage && this.s3Service.isS3Key(company.coverImage)) {
           oldKeys.push(company.coverImage);
         }
         updateCompanyDto.coverImage = await this.s3Service.uploadCoverImage(files.coverImage[0]);
+      } else {
+        // Remove coverImage from DTO to preserve existing value
+        delete updateCompanyDto.coverImage;
       }
 
+      // Apply only the fields that were explicitly provided
       Object.assign(company, updateCompanyDto);
       const savedCompany = await this.companyRepository.save(company);
 
+      // Delete old files from S3 after successful update
       for (const key of oldKeys) {
         try {
           await this.s3Service.deleteFile(key);

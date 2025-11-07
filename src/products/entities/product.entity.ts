@@ -14,7 +14,7 @@ export class Product {
   description: string;
 
   @Column('text', { array: true, default: [] })
-  images: string[];
+  images: string[]; // Now stores S3 keys instead of URLs
 
   @Column('decimal', { precision: 10, scale: 2, nullable: true })
   price: number;

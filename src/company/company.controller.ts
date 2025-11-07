@@ -12,7 +12,7 @@ import {
   UploadedFiles 
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { CompanyService } from './company.service';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
@@ -217,7 +217,63 @@ export class CompanyController {
   @ApiConsumes('multipart/form-data')
   @ApiOperation({ 
     summary: 'Update authenticated company profile with file uploads',
-    description: 'Update profile with optional file uploads for user photo, logo, and cover image'
+    description: 'Update profile with optional file uploads for user photo, logo, and cover image. All fields are optional.'
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        // File upload fields
+        userPhoto: {
+          type: 'string',
+          format: 'binary',
+          description: 'User profile photo (optional)',
+        },
+        logo: {
+          type: 'string',
+          format: 'binary',
+          description: 'Company logo (optional)',
+        },
+        coverImage: {
+          type: 'string',
+          format: 'binary',
+          description: 'Company cover image (optional)',
+        },
+        // Text fields from UpdateCompanyDto
+        companyName: {
+          type: 'string',
+          example: 'Tech Solutions Pvt Ltd',
+        },
+        address: {
+          type: 'string',
+          example: '123 Business Street, Tech City, State 123456',
+        },
+        description: {
+          type: 'string',
+          example: 'Leading provider of technology solutions',
+        },
+        category: {
+          type: 'string',
+          example: 'IT Services',
+        },
+        userName: {
+          type: 'string',
+          example: 'John Doe',
+        },
+        registeredAddress: {
+          type: 'string',
+          example: '123 Corporate Ave, City, State 123456',
+        },
+        about: {
+          type: 'string',
+          example: 'We are a leading tech company specializing in AI solutions.',
+        },
+        operationalAddress: {
+          type: 'string',
+          example: '456 Tech Park, City, State 123456',
+        },
+      },
+    },
   })
   @ApiResponse({ status: 200, description: 'Company profile updated successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
