@@ -1,18 +1,23 @@
-// src/modules/auth/auth.controller.ts - UPDATED WITH FILE UPLOAD
+// src/modules/auth/auth.controller.ts - UPDATED WITH GST DETAILS ENDPOINT
 import { 
   Controller, 
   Post, 
   Body, 
   UseInterceptors, 
   UploadedFiles,
-  BadRequestException 
+  BadRequestException,
+  UseGuards,
+  Get,
+  Query
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../core/guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RegisterDto } from './dto/register.dto';
+import { GstDetailsDto } from './dto/gst-details.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -66,7 +71,6 @@ export class AuthController {
         description: { type: 'string', example: 'Leading provider of tech solutions' },
         referredBy: { type: 'string', example: 'BIZAP1234' },
         category: { type: 'string', example: 'IT Services' },
-        // File uploads
         userPhoto: { 
           type: 'string', 
           format: 'binary',
@@ -82,7 +86,6 @@ export class AuthController {
           format: 'binary',
           description: 'Company cover image (JPEG/PNG/WebP, max 5MB) - Optional if coverImageUrl provided'
         },
-        // URL alternatives (backward compatibility)
         userPhotoUrl: { 
           type: 'string', 
           example: 'https://example.com/user.jpg',
@@ -110,11 +113,10 @@ export class AuthController {
       coverImage?: Express.Multer.File[]
     }
   ) {
-    // Validate that either file or URL is provided for required images
     const userPhotoFile = files?.userPhoto?.[0];
     const logoFile = files?.logo?.[0];
-    const userPhotoUrl = registerDto.userPhoto; // From form data
-    const logoUrl = registerDto.logo; // From form data
+    const userPhotoUrl = registerDto.userPhoto;
+    const logoUrl = registerDto.logo;
 
     if (!userPhotoFile && !userPhotoUrl) {
       throw new BadRequestException('Either userPhoto file or userPhotoUrl must be provided');
@@ -124,8 +126,63 @@ export class AuthController {
       throw new BadRequestException('Either logo file or logoUrl must be provided');
     }
 
-    // coverImage is optional, no validation needed
-
     return this.authService.register(registerDto, files);
+  }
+
+  @Get('gst-details')
+  @ApiOperation({ 
+    summary: 'Get GST details by GST number (Public)',
+    description: 'Fetch complete GST information including company details, address, and business activities. No authentication required.'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'GST details retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        flag: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'GSTIN found.' },
+        data: {
+          type: 'object',
+          properties: {
+            gstin: { type: 'string', example: '06AACCG0527D1Z8' },
+            lgnm: { type: 'string', example: 'GOOGLE INDIA PRIVATE LIMTED' },
+            tradeNam: { type: 'string', example: 'GOOGLE INDIA PVT LTD' },
+            sts: { type: 'string', example: 'Active' },
+            ctb: { type: 'string', example: 'Private Limited Company' },
+            rgdt: { type: 'string', example: '01/07/2017' },
+            dty: { type: 'string', example: 'Regular' },
+            nba: { 
+              type: 'array', 
+              items: { type: 'string' },
+              example: ['Service Provision', 'Recipient of Goods or Services']
+            },
+            pradr: {
+              type: 'object',
+              properties: {
+                addr: {
+                  type: 'object',
+                  properties: {
+                    bnm: { type: 'string', example: 'Unitech Signature Tower' },
+                    st: { type: 'string', example: 'Sector- 15, Part-I' },
+                    loc: { type: 'string', example: 'Silokhera' },
+                    dst: { type: 'string', example: 'Gurgaon' },
+                    stcd: { type: 'string', example: 'Haryana' },
+                    pncd: { type: 'string', example: '122002' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 400, description: 'Invalid GST number format' })
+  @ApiResponse({ status: 404, description: 'GST number not found' })
+  @ApiResponse({ status: 408, description: 'GST API request timeout' })
+  @ApiResponse({ status: 500, description: 'Internal server error' })
+  async getGstDetails(@Query() gstDetailsDto: GstDetailsDto) {
+    return this.authService.getGstDetails(gstDetailsDto);
   }
 }
