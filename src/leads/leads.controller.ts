@@ -30,6 +30,7 @@ import { LeadsService } from './leads.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { DeactivateLeadDto } from './dto/deactivate-lead.dto';
+import { UpdateConsumedLeadStatusDto } from './dto/update-consumed-lead-status.dto';
 import { JwtAuthGuard } from '../core/guards/jwt-auth.guard';
 
 @ApiTags('Leads')
@@ -363,4 +364,93 @@ export class LeadsController {
       data: { imageUrl },
     };
   }
+
+  // Add these endpoints to leads.controller.ts (USER endpoints)
+
+// ===========================================================
+// 🆕 CONSUMED LEAD STATUS TRACKING ENDPOINTS
+// ===========================================================
+
+@Get('consumed-leads/my-status')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
+@ApiOperation({ summary: 'Get all consumed leads with their status for authenticated company' })
+@ApiResponse({ status: 200, description: 'Consumed leads with status retrieved successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+async getMyConsumedLeadsWithStatus(@Request() req) {
+  const consumedLeads = await this.leadsService.getMyConsumedLeadsWithStatus(req.user.companyId);
+  return {
+    message: 'Consumed leads with status retrieved successfully',
+    data: consumedLeads,
+  };
+}
+
+@Get('consumed-leads/:id')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
+@ApiOperation({ summary: 'Get details of a specific consumed lead' })
+@ApiParam({ name: 'id', description: 'Consumed Lead UUID' })
+@ApiResponse({ status: 200, description: 'Consumed lead details retrieved successfully' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 404, description: 'Consumed lead not found' })
+async getConsumedLeadDetails(@Request() req, @Param('id') id: string) {
+  const consumedLead = await this.leadsService.getConsumedLeadDetails(id, req.user.companyId);
+  return {
+    message: 'Consumed lead details retrieved successfully',
+    data: consumedLead,
+  };
+}
+
+@Patch('consumed-leads/:id/status')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('JWT-auth')
+@ApiOperation({ summary: 'Update the status of a consumed lead' })
+@ApiParam({ name: 'id', description: 'Consumed Lead UUID' })
+@ApiBody({
+  description: 'Update consumed lead status',
+  schema: {
+    type: 'object',
+    properties: {
+      dealStatus: {
+        type: 'string',
+        enum: ['PENDING', 'COMPLETED', 'FAILED', 'NO_RESPONSE'],
+        example: 'COMPLETED',
+        description: 'Current status of the deal',
+      },
+      dealNotes: {
+        type: 'string',
+        example: 'Successfully closed the deal. Great lead quality!',
+        description: 'Optional notes about the deal outcome',
+      },
+      dealValue: {
+        type: 'number',
+        example: 50000,
+        description: 'Deal value in INR (required for COMPLETED status)',
+      },
+    },
+    required: ['dealStatus'],
+  },
+})
+@ApiResponse({ status: 200, description: 'Consumed lead status updated successfully' })
+@ApiResponse({ status: 400, description: 'Bad request - Invalid status or missing deal value' })
+@ApiResponse({ status: 401, description: 'Unauthorized' })
+@ApiResponse({ status: 403, description: 'Forbidden - Not your consumed lead' })
+@ApiResponse({ status: 404, description: 'Consumed lead not found' })
+async updateConsumedLeadStatus(
+  @Request() req,
+  @Param('id') id: string,
+  @Body() updateStatusDto: UpdateConsumedLeadStatusDto,
+) {
+  const updatedConsumedLead = await this.leadsService.updateConsumedLeadStatus(
+    id,
+    req.user.companyId,
+    updateStatusDto,
+  );
+  return {
+    message: 'Consumed lead status updated successfully',
+    data: updatedConsumedLead,
+  };
+}
+
+
 }

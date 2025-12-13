@@ -364,4 +364,57 @@ export class AdminLeadsController {
       data: null,
     };
   }
+
+  // Add these endpoints to admin.leads.controller.ts (ADMIN endpoints)
+
+// ===========================================================
+// 🆕 ADMIN: CONSUMED LEAD STATUS & ANALYTICS ENDPOINTS
+// ===========================================================
+
+@Get('admin/consumed-leads')
+@ApiOperation({ summary: 'Get all consumed leads with status (admin only)' })
+@ApiResponse({ status: 200, description: 'All consumed leads retrieved successfully' })
+async getAllConsumedLeadsWithStatus() {
+  const consumedLeads = await this.leadsService.getAllConsumedLeadsWithStatus();
+  return {
+    message: 'All consumed leads retrieved successfully',
+    data: consumedLeads,
+  };
+}
+
+@Get('admin/consumed-leads/metrics')
+@ApiOperation({ summary: 'Get comprehensive conversion metrics (admin only)' })
+@ApiResponse({ status: 200, description: 'Conversion metrics retrieved successfully' })
+async getConsumedLeadMetrics() {
+  const metrics = await this.leadsService.getConsumedLeadMetrics();
+  return {
+    message: 'Conversion metrics retrieved successfully',
+    data: metrics,
+  };
+}
+
+@Get('admin/consumed-leads/company/:companyId')
+@ApiOperation({ summary: 'Get consumed leads for a specific company (admin only)' })
+@ApiParam({ name: 'companyId', description: 'Company UUID' })
+@ApiResponse({ status: 200, description: 'Company consumed leads retrieved successfully' })
+@ApiResponse({ status: 404, description: 'Company not found' })
+async getCompanyConsumedLeads(@Param('companyId') companyId: string) {
+  const consumedLeads = await this.leadsService.getCompanyConsumedLeadsWithStatus(companyId);
+  return {
+    message: 'Company consumed leads retrieved successfully',
+    data: consumedLeads,
+  };
+}
+
+@Get('admin/consumed-leads/company/:companyId/metrics')
+@ApiOperation({ summary: 'Get conversion metrics for a specific company (admin only)' })
+@ApiParam({ name: 'companyId', description: 'Company UUID' })
+@ApiResponse({ status: 200, description: 'Company conversion metrics retrieved successfully' })
+async getCompanyConversionMetrics(@Param('companyId') companyId: string) {
+  const metrics = await this.leadsService.getCompanyConversionMetrics(companyId);
+  return {
+    message: 'Company conversion metrics retrieved successfully',
+    data: metrics,
+  };
+}
 }
