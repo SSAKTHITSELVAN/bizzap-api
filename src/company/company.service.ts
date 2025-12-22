@@ -9,6 +9,7 @@ import { UpdateCompanyDto } from './dto/update-company.dto';
 import { S3Service } from '../chat/s3.service';
 import { v4 as uuidv4 } from 'uuid';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { LeadQuotaDetailsDto } from './dto/lead-quota-details.dto';
 
 @Injectable()
 export class CompanyService {
@@ -65,6 +66,33 @@ export class CompanyService {
     }
     
     return companyObj;
+  }
+  /**
+   * Get detailed lead quota information for a company
+   */
+  async getLeadQuotaDetails(companyId: string): Promise<LeadQuotaDetailsDto> {
+    const company = await this.findOne(companyId);
+
+    // Calculate next reset date (1st of next month at 00:00)
+    const now = new Date();
+    const nextResetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+    
+    // Calculate days until reset
+    const msPerDay = 24 * 60 * 60 * 1000;
+    const daysUntilReset = Math.ceil((nextResetDate.getTime() - now.getTime()) / msPerDay);
+
+    return {
+      totalLeadQuota: company.leadQuota,
+      consumedLeads: company.consumedLeads,
+      remainingLeads: Math.max(0, company.leadQuota - company.consumedLeads),
+      postingQuota: company.postingQuota,
+      postedLeads: company.postedLeads,
+      remainingPosts: Math.max(0, company.postingQuota - company.postedLeads),
+      nextResetDate,
+      daysUntilReset,
+      referralCode: company.referralCode,
+      referralInfo: 'Share your referral code to earn 5 bonus leads per successful referral! New users also get 5 bonus leads.',
+    };
   }
 
   /**
