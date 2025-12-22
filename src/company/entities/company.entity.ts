@@ -1,11 +1,9 @@
-// src/modules/company/entities/company.entity.ts (Updated with Permanent Quota Tracking)
+// src/modules/company/entities/company.entity.ts
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, OneToMany } from 'typeorm';
 import { Lead } from '../../leads/entities/lead.entity';
 import { Product } from '../../products/entities/product.entity';
 import { Follower } from '../../followers/entities/follower.entity';
 import { Post } from '../../posts/entities/post.entity';
-import { Subscription } from './subscription.entity';
-import { PaymentHistory } from './payment-history.entity';
 
 @Entity('companies')
 export class Company {
@@ -21,50 +19,29 @@ export class Company {
   @Column()
   companyName: string;
 
-  @Column({ nullable: true })
-  logo: string;
-
-  @Column('text', { nullable: true })
-  address: string;
-
-  @Column('text', { nullable: true })
-  description: string;
-
-  @Column({ nullable: true })
-  category: string;
-
   @Column({ unique: true })
   referralCode: string;
 
-  // 🆕 NEW: Permanent lead quota (referrals + pay-as-you-go + monthly free)
-  // This quota NEVER resets and persists across subscription changes
-  @Column({ default: 10 })
-  permanentLeadQuota: number;
-
-  // Total lead quota (permanent + subscription quota)
+  // Monthly free leads (10) + referral bonuses (5 per referral)
   @Column({ default: 10 })
   leadQuota: number;
 
   @Column({ default: 0 })
   consumedLeads: number;
 
+  // Monthly posting quota
   @Column({ default: 30 })
   postingQuota: number;
 
   @Column({ default: 0 })
   postedLeads: number;
 
-  @Column({ default: 'FREEMIUM' })
-  currentTier: string;
-
-  @Column({ default: false })
-  hasVerifiedBadge: boolean;
+  // Track social engagement - required for FollowersService
+  @Column({ default: 0 })
+  followersCount: number;
 
   @Column({ default: false })
   isDeleted: boolean;
-
-  @Column({ default: 0 })
-  followersCount: number;
 
   @CreateDateColumn()
   createdAt: Date;
@@ -75,24 +52,38 @@ export class Company {
   @UpdateDateColumn()
   updatedAt: Date;
 
+  // Profile fields
   @Column({ nullable: true })
-  userName: string;
-
-  @Column({ nullable: true })
-  userPhoto: string;
+  logo?: string;
 
   @Column({ nullable: true })
-  coverImage: string;
+  address?: string;
 
   @Column('text', { nullable: true })
-  registeredAddress: string;
+  description?: string;
+
+  @Column({ nullable: true })
+  category?: string;
+
+  @Column({ nullable: true })
+  userName?: string;
+
+  @Column({ nullable: true })
+  userPhoto?: string;
+
+  @Column({ nullable: true })
+  coverImage?: string;
+
+  @Column({ nullable: true })
+  registeredAddress?: string;
 
   @Column('text', { nullable: true })
-  about: string;
+  about?: string;
 
-  @Column('text', { nullable: true })
-  operationalAddress: string;
+  @Column({ nullable: true })
+  operationalAddress?: string;
 
+  // Relations
   @OneToMany(() => Lead, (lead) => lead.company)
   leads: Lead[];
 
@@ -107,10 +98,4 @@ export class Company {
 
   @OneToMany(() => Post, (post) => post.company)
   posts: Post[];
-
-  @OneToMany(() => Subscription, (subscription) => subscription.company)
-  subscriptions: Subscription[];
-
-  @OneToMany(() => PaymentHistory, (payment) => payment.company)
-  paymentHistory: PaymentHistory[];
 }

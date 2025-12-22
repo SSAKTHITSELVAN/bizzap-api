@@ -1,8 +1,6 @@
-// src/config/typeorm.config.ts (Updated)
+// src/config/typeorm.config.ts - Simplified without payment entities
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { Company } from '../company/entities/company.entity';
-import { Subscription } from '../company/entities/subscription.entity';
-import { PaymentHistory } from '../company/entities/payment-history.entity';
 import { Lead } from '../leads/entities/lead.entity';
 import { Product } from '../products/entities/product.entity';
 import { Follower } from '../followers/entities/follower.entity';
@@ -22,8 +20,6 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
   database: process.env.DATABASE_NAME || 'bizzap_db',
   entities: [
     Company,
-    Subscription,
-    PaymentHistory,
     Lead,
     Product,
     Follower,

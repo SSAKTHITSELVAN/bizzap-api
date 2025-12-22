@@ -1,4 +1,4 @@
-// src/main.ts - Updated with organized Swagger configuration
+// src/main.ts - Simplified Swagger configuration
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -15,7 +15,7 @@ async function bootstrap() {
   // Swagger configuration with organized tags
   const config = new DocumentBuilder()
     .setTitle('Bizzap API')
-    .setDescription('Business networking platform API with leads, products, and company management')
+    .setDescription('Business networking platform API - Free leads with referral bonuses')
     .setVersion('1.0')
     .addBearerAuth(
       {
@@ -31,7 +31,7 @@ async function bootstrap() {
     // Core functionality tags
     .addTag('Auth', 'Authentication and authorization endpoints')
     .addTag('Companies', 'Company profile and management')
-    .addTag('Leads', 'Lead creation, consumption, and management')
+    .addTag('Leads', 'Lead creation, consumption, and management (10 free leads/month + referral bonuses)')
     .addTag('Products', 'Product catalog management')
     .addTag('Posts', 'Social posts, comments, likes, and saves')
     
@@ -41,7 +41,6 @@ async function bootstrap() {
     
     // Utility tags
     .addTag('Search', 'Global search functionality')
-    .addTag('Subscription', 'Subscription plans and billing')
     
     // Admin tags
     .addTag('Admin-Leads', 'Admin-only lead metrics and management')
@@ -54,11 +53,11 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document, {
     swaggerOptions: {
       persistAuthorization: true,
-      tagsSorter: 'alpha', // Sort tags alphabetically
-      operationsSorter: 'alpha', // Sort operations alphabetically within tags
-      docExpansion: 'none', // Collapse all sections by default
-      filter: true, // Enable search/filter
-      displayRequestDuration: true, // Show request duration
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
+      docExpansion: 'none',
+      filter: true,
+      displayRequestDuration: true,
     },
   });
   
