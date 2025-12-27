@@ -1,4 +1,4 @@
-// src/config/typeorm.config.ts - Simplified without payment entities
+// src/config/typeorm.config.ts - Updated with notification entities
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { Company } from '../company/entities/company.entity';
 import { Lead } from '../leads/entities/lead.entity';
@@ -10,6 +10,8 @@ import { Post } from '../posts/entities/post.entity';
 import { PostLike } from '../posts/entities/post-like.entity';
 import { PostComment } from '../posts/entities/post-comment.entity';
 import { PostSave } from '../posts/entities/post-save.entity';
+import { Notification } from '../notifications/entities/notification.entity';
+import { ExpoPushToken } from '../notifications/entities/expo-push-token.entity';
 
 export const typeOrmConfig: TypeOrmModuleOptions = {
   type: 'postgres',
@@ -29,6 +31,8 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
     PostLike,
     PostComment,
     PostSave,
+    Notification,
+    ExpoPushToken,
   ],
   synchronize: true,
   logging: false,

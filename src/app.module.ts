@@ -1,4 +1,4 @@
-// src/app.module.ts
+// src/app.module.ts - Updated with NotificationsModule
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
@@ -16,6 +16,7 @@ import { SearchModule } from './search/search.module';
 import { ChatModule } from './chat/chat.module';
 import { PostsModule } from './posts/posts.module';
 import { SubscriptionModule } from './subscription/subscription.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { SubscriptionModule } from './subscription/subscription.module';
     ChatModule,
     PostsModule,
     SubscriptionModule,
+    NotificationsModule, // Added
   ],
 })
 export class AppModule {}
