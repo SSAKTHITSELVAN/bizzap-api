@@ -10,6 +10,8 @@ import { Post } from '../posts/entities/post.entity';
 import { PostLike } from '../posts/entities/post-like.entity';
 import { PostComment } from '../posts/entities/post-comment.entity';
 import { PostSave } from '../posts/entities/post-save.entity';
+import { ExpoPushToken } from 'src/notifications/entities/expo-push-token.entity';
+import { Notification } from 'src/notifications/entities/notification.entity';
 
 // Load environment variables
 import * as dotenv from 'dotenv';
@@ -33,6 +35,8 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
     PostLike,
     PostComment,
     PostSave,
+    Notification, 
+    ExpoPushToken
   ],
   synchronize: true,
   logging: false,

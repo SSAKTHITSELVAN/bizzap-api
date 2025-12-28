@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Company } from '../../company/entities/company.entity';
 import { Lead } from '../../leads/entities/lead.entity';
@@ -23,6 +24,7 @@ export class Notification {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index()
   @Column()
   companyId: string;
 
@@ -53,13 +55,12 @@ export class Notification {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  @ManyToOne(() => Company, { nullable: true })
+  @ManyToOne(() => Company, { nullable: true, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'companyId' })
   company?: Company;
 
-  @ManyToOne(() => Lead, { nullable: true })
+  // Make lead relation optional and handle deletion gracefully
+  @ManyToOne(() => Lead, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'leadId' })
   lead?: Lead;
 }
-
-// ==========================================

@@ -1,7 +1,7 @@
 // src/modules/notifications/notifications.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, In } from 'typeorm';
+import { Repository, Not, In, IsNull } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
 import { ExpoPushToken } from './entities/expo-push-token.entity';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
@@ -297,23 +297,57 @@ export class NotificationsService {
   }
 
   /**
-   * Get all notifications for a user
+   * Get all notifications for a user - FIXED VERSION
    */
   async getUserNotifications(companyId: string): Promise<Notification[]> {
-    return await this.notificationRepository.find({
-      where: { companyId },
-      relations: ['lead'],
-      order: { createdAt: 'DESC' },
-    });
+    try {
+      const notifications = await this.notificationRepository.find({
+        where: { companyId },
+        order: { createdAt: 'DESC' },
+      });
+
+      // Manually load lead data for notifications that have leadId
+      const notificationsWithLeads = await Promise.all(
+        notifications.map(async (notification) => {
+          if (notification.leadId) {
+            try {
+              const lead = await this.notificationRepository
+                .createQueryBuilder('notification')
+                .leftJoinAndSelect('notification.lead', 'lead')
+                .where('notification.id = :id', { id: notification.id })
+                .getOne();
+              
+              if (lead?.lead) {
+                notification.lead = lead.lead;
+              }
+            } catch (error) {
+              console.warn(`Could not load lead ${notification.leadId} for notification ${notification.id}`);
+              // Continue without the lead data
+            }
+          }
+          return notification;
+        })
+      );
+
+      return notificationsWithLeads;
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      throw error;
+    }
   }
 
   /**
-   * Get unread notification count
+   * Get unread notification count - FIXED VERSION
    */
   async getUnreadCount(companyId: string): Promise<number> {
-    return await this.notificationRepository.count({
-      where: { companyId, isRead: false },
-    });
+    try {
+      return await this.notificationRepository.count({
+        where: { companyId, isRead: false },
+      });
+    } catch (error) {
+      console.error('Error getting unread count:', error);
+      throw error;
+    }
   }
 
   /**
