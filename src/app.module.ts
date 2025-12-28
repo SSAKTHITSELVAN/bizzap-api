@@ -37,7 +37,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     ChatModule,
     PostsModule,
     SubscriptionModule,
-    NotificationsModule, // Added
+    NotificationsModule,
   ],
 })
 export class AppModule {}
