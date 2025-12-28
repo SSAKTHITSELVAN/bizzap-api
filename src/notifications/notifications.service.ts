@@ -1,7 +1,7 @@
 // src/modules/notifications/notifications.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not, In, IsNull } from 'typeorm';
+import { Repository, Not, In } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
 import { ExpoPushToken } from './entities/expo-push-token.entity';
 import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
@@ -28,18 +28,15 @@ export class NotificationsService {
     deviceId?: string,
     platform?: string,
   ): Promise<ExpoPushToken> {
-    // Validate token
     if (!Expo.isExpoPushToken(token)) {
       throw new Error(`Push token ${token} is not a valid Expo push token`);
     }
 
-    // Check if token already exists
     const existingToken = await this.expoPushTokenRepository.findOne({
       where: { token },
     });
 
     if (existingToken) {
-      // Update existing token
       existingToken.companyId = companyId;
       existingToken.deviceId = deviceId;
       existingToken.platform = platform;
@@ -47,7 +44,6 @@ export class NotificationsService {
       return await this.expoPushTokenRepository.save(existingToken);
     }
 
-    // Create new token
     const newToken = this.expoPushTokenRepository.create({
       companyId,
       token,
@@ -59,16 +55,10 @@ export class NotificationsService {
     return await this.expoPushTokenRepository.save(newToken);
   }
 
-  /**
-   * Unregister a push token
-   */
   async unregisterPushToken(token: string): Promise<void> {
     await this.expoPushTokenRepository.update({ token }, { isActive: false });
   }
 
-  /**
-   * Get all active tokens for a company
-   */
   async getCompanyTokens(companyId: string): Promise<string[]> {
     const tokens = await this.expoPushTokenRepository.find({
       where: { companyId, isActive: true },
@@ -85,14 +75,11 @@ export class NotificationsService {
     body: string,
     data?: any,
   ): Promise<void> {
-    // Filter valid tokens
     const validTokens = tokens.filter(token => Expo.isExpoPushToken(token));
 
-    if (validTokens.length === 0) {
-      return;
-    }
+    if (validTokens.length === 0) return;
 
-    // Create messages
+    // Create messages with Android Channel ID
     const messages: ExpoPushMessage[] = validTokens.map(token => ({
       to: token,
       sound: 'default',
@@ -100,9 +87,11 @@ export class NotificationsService {
       body,
       data: data || {},
       priority: 'high',
+      channelId: 'default', // REQUIRED for Android 8+ to trigger sound/vibration
+      badge: 1,
+      _displayInForeground: true,
     }));
 
-    // Send in chunks
     const chunks = this.expo.chunkPushNotifications(messages);
     const tickets: ExpoPushTicket[] = [];
 
@@ -111,11 +100,11 @@ export class NotificationsService {
         const ticketChunk = await this.expo.sendPushNotificationsAsync(chunk);
         tickets.push(...ticketChunk);
       } catch (error) {
-        console.error('Error sending push notifications:', error);
+        console.error('Error sending push notifications chunk:', error);
       }
     }
 
-    // Handle tickets and remove invalid tokens
+    // Clean up invalid tokens
     for (let i = 0; i < tickets.length; i++) {
       const ticket = tickets[i];
       if (ticket.status === 'error') {
@@ -126,9 +115,6 @@ export class NotificationsService {
     }
   }
 
-  /**
-   * Create notification in database
-   */
   async createNotification(
     companyId: string,
     type: NotificationType,
@@ -149,16 +135,12 @@ export class NotificationsService {
     return await this.notificationRepository.save(notification);
   }
 
-  /**
-   * Send notification for new lead (to all users except creator)
-   */
   async sendNewLeadNotification(
     leadId: string,
     leadTitle: string,
     creatorCompanyId: string,
   ): Promise<void> {
     try {
-      // Get all active tokens except creator
       const tokens = await this.expoPushTokenRepository.find({
         where: { 
           companyId: Not(creatorCompanyId), 
@@ -166,34 +148,25 @@ export class NotificationsService {
         },
       });
 
-      if (tokens.length === 0) {
-        console.log('No tokens found for new lead notification');
-        return;
-      }
+      if (tokens.length === 0) return;
 
       const pushTokens = tokens.map(t => t.token);
+      const allCompanyIds = [...new Set(tokens.map(t => t.companyId))];
 
-      // Send push notifications
+      // 1. Send Pushes
       await this.sendPushNotifications(
         pushTokens,
-        '🆕 New Lead Available',
+        '📣 New Lead Available',
         `${leadTitle}`,
-        { 
-          type: 'NEW_LEAD', 
-          leadId,
-          screen: 'LeadDetails'
-        },
+        { type: 'NEW_LEAD', leadId, screen: 'LeadDetails' },
       );
 
-      // Create notifications in database for all users except creator
-      const allCompanyIds = tokens.map(t => t.companyId);
-      const uniqueCompanyIds = [...new Set(allCompanyIds)];
-
-      const notificationPromises = uniqueCompanyIds.map(companyId =>
+      // 2. Create DB Entries
+      const notificationPromises = allCompanyIds.map(companyId =>
         this.createNotification(
           companyId,
           NotificationType.NEW_LEAD,
-          '🆕 New Lead Available',
+          '📣 New Lead Available',
           leadTitle,
           { leadId, screen: 'LeadDetails' },
           leadId,
@@ -203,13 +176,9 @@ export class NotificationsService {
       await Promise.all(notificationPromises);
     } catch (error) {
       console.error('Error sending new lead notification:', error);
-      throw error;
     }
   }
 
-  /**
-   * Send notification when someone consumes your lead
-   */
   async sendLeadConsumedNotification(
     leadOwnerId: string,
     leadTitle: string,
@@ -218,56 +187,41 @@ export class NotificationsService {
     try {
       const tokens = await this.getCompanyTokens(leadOwnerId);
 
-      if (tokens.length === 0) {
-        console.log('No tokens found for lead owner');
-        return;
+      if (tokens.length > 0) {
+        await this.sendPushNotifications(
+          tokens,
+          '🤝 Lead Consumed',
+          `${consumerCompanyName} viewed your lead: ${leadTitle}`,
+          { type: 'LEAD_CONSUMED', screen: 'MyLeads' },
+        );
       }
-
-      await this.sendPushNotifications(
-        tokens,
-        '🎉 Lead Consumed',
-        `${consumerCompanyName} viewed your lead: ${leadTitle}`,
-        { 
-          type: 'LEAD_CONSUMED',
-          screen: 'MyLeads'
-        },
-      );
 
       await this.createNotification(
         leadOwnerId,
         NotificationType.LEAD_CONSUMED,
-        '🎉 Lead Consumed',
+        '🤝 Lead Consumed',
         `${consumerCompanyName} viewed your lead: ${leadTitle}`,
         { screen: 'MyLeads' },
       );
     } catch (error) {
       console.error('Error sending lead consumed notification:', error);
-      throw error;
     }
   }
 
-  /**
-   * Send broadcast notification to all users (Admin only)
-   */
   async sendBroadcastNotification(
     title: string,
     body: string,
     data?: any,
   ): Promise<void> {
     try {
-      // Get all active tokens
       const allTokens = await this.expoPushTokenRepository.find({
         where: { isActive: true },
       });
 
-      if (allTokens.length === 0) {
-        console.log('No active tokens found for broadcast');
-        return;
-      }
+      if (allTokens.length === 0) return;
 
       const pushTokens = allTokens.map(t => t.token);
-
-      // Send push notifications
+      
       await this.sendPushNotifications(
         pushTokens,
         title,
@@ -275,9 +229,7 @@ export class NotificationsService {
         { ...data, type: 'ADMIN_BROADCAST' },
       );
 
-      // Create notifications for all users
-      const allCompanyIds = allTokens.map(t => t.companyId);
-      const uniqueCompanyIds = [...new Set(allCompanyIds)];
+      const uniqueCompanyIds = [...new Set(allTokens.map(t => t.companyId))];
 
       const notificationPromises = uniqueCompanyIds.map(companyId =>
         this.createNotification(
@@ -296,63 +248,42 @@ export class NotificationsService {
     }
   }
 
-  /**
-   * Get all notifications for a user - FIXED VERSION
-   */
   async getUserNotifications(companyId: string): Promise<Notification[]> {
-    try {
-      const notifications = await this.notificationRepository.find({
-        where: { companyId },
-        order: { createdAt: 'DESC' },
-      });
+    const notifications = await this.notificationRepository.find({
+      where: { companyId },
+      order: { createdAt: 'DESC' },
+    });
 
-      // Manually load lead data for notifications that have leadId
-      const notificationsWithLeads = await Promise.all(
-        notifications.map(async (notification) => {
-          if (notification.leadId) {
-            try {
-              const lead = await this.notificationRepository
-                .createQueryBuilder('notification')
-                .leftJoinAndSelect('notification.lead', 'lead')
-                .where('notification.id = :id', { id: notification.id })
-                .getOne();
-              
-              if (lead?.lead) {
-                notification.lead = lead.lead;
-              }
-            } catch (error) {
-              console.warn(`Could not load lead ${notification.leadId} for notification ${notification.id}`);
-              // Continue without the lead data
+    const notificationsWithLeads = await Promise.all(
+      notifications.map(async (notification) => {
+        if (notification.leadId) {
+          try {
+            const leadNotif = await this.notificationRepository
+              .createQueryBuilder('notification')
+              .leftJoinAndSelect('notification.lead', 'lead')
+              .where('notification.id = :id', { id: notification.id })
+              .getOne();
+            
+            if (leadNotif?.lead) {
+              notification.lead = leadNotif.lead;
             }
+          } catch (e) {
+            // Ignore lead load errors
           }
-          return notification;
-        })
-      );
+        }
+        return notification;
+      })
+    );
 
-      return notificationsWithLeads;
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-      throw error;
-    }
+    return notificationsWithLeads;
   }
 
-  /**
-   * Get unread notification count - FIXED VERSION
-   */
   async getUnreadCount(companyId: string): Promise<number> {
-    try {
-      return await this.notificationRepository.count({
-        where: { companyId, isRead: false },
-      });
-    } catch (error) {
-      console.error('Error getting unread count:', error);
-      throw error;
-    }
+    return await this.notificationRepository.count({
+      where: { companyId, isRead: false },
+    });
   }
 
-  /**
-   * Mark notifications as read
-   */
   async markAsRead(notificationIds: string[]): Promise<void> {
     await this.notificationRepository.update(
       { id: In(notificationIds) },
@@ -360,9 +291,6 @@ export class NotificationsService {
     );
   }
 
-  /**
-   * Mark all notifications as read for a user
-   */
   async markAllAsRead(companyId: string): Promise<void> {
     await this.notificationRepository.update(
       { companyId, isRead: false },
@@ -370,24 +298,15 @@ export class NotificationsService {
     );
   }
 
-  /**
-   * Delete a notification
-   */
   async deleteNotification(notificationId: string, companyId: string): Promise<void> {
     const notification = await this.notificationRepository.findOne({
       where: { id: notificationId, companyId },
     });
 
-    if (!notification) {
-      throw new NotFoundException('Notification not found');
-    }
-
+    if (!notification) throw new NotFoundException('Notification not found');
     await this.notificationRepository.remove(notification);
   }
 
-  /**
-   * Delete all notifications for a user
-   */
   async deleteAllNotifications(companyId: string): Promise<void> {
     await this.notificationRepository.delete({ companyId });
   }
