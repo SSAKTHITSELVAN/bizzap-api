@@ -262,40 +262,54 @@ export class LeadsService {
     return this.s3Service.generateSignedUrl(lead.imageKey, 3600);
   }
 
-  // Update the consumeLead method to send notifications
-  async consumeLead(leadId: string, consumerCompanyId: string): Promise<{ success: boolean; contact?: string }> {
+
+  /**
+   * 🔑 Consume a lead - Updated with monthly quota system
+   */
+  async consumeLead(leadId: string, consumerCompanyId: string): Promise<{ success: boolean; contact?: string; message?: string }> {
     const lead = await this.findOne(leadId);
 
+    // Check 1: Cannot consume your own lead
     if (lead.companyId === consumerCompanyId) {
       throw new ForbiddenException('Cannot consume your own lead');
     }
 
+    // Check 2: Already consumed this lead before?
     const hasConsumed = await this.consumedLeadRepository.findOne({
       where: { companyId: consumerCompanyId, leadId },
     });
     
     if (hasConsumed) {
+      // Already consumed, return contact immediately without deducting quota
       return {
         success: true,
         contact: lead.company.phoneNumber,
+        message: 'You have already consumed this lead previously',
       };
     }
 
+    // Check 3: Do they have leads available this month?
     const canConsume = await this.companyService.consumeLead(consumerCompanyId);
     if (!canConsume) {
-      return { success: false };
+      const company = await this.companyService.findOne(consumerCompanyId);
+      return { 
+        success: false, 
+        message: `Monthly lead quota exhausted (${company.consumedLeads}/${company.leadQuota}). Share your referral code to earn 2 more leads per referral!`
+      };
     }
 
+    // ✅ All checks passed - consume the lead
     lead.consumedCount = lead.consumedCount + 1;
     await this.leadRepository.save(lead);
     
+    // Create consumed lead record
     const consumedRecord = this.consumedLeadRepository.create({
       companyId: consumerCompanyId,
       leadId: leadId
     });
     await this.consumedLeadRepository.save(consumedRecord);
 
-    // 🆕 Send notification to lead owner
+    // 🔔 Send notification to lead owner
     try {
       const consumerCompany = await this.companyService.findOne(consumerCompanyId);
       await this.notificationsService.sendLeadConsumedNotification(
@@ -307,9 +321,13 @@ export class LeadsService {
       console.error('Failed to send lead consumed notification:', error);
     }
 
+    const company = await this.companyService.findOne(consumerCompanyId);
+    const remainingLeads = company.leadQuota - company.consumedLeads;
+
     return {
       success: true,
       contact: lead.company.phoneNumber,
+      message: `Lead consumed successfully! You have ${remainingLeads} leads remaining this month.`,
     };
   }
 

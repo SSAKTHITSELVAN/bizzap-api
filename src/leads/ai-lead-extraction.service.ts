@@ -1,4 +1,4 @@
-// src/modules/leads/services/ai-lead-extraction.service.ts
+// src/modules/leads/ai-lead-extraction.service.ts - Updated
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Groq from 'groq-sdk';
@@ -91,7 +91,7 @@ Analyze the user's input and extract the following fields:
 - **description**: A detailed description of what the user needs
 - **budget**: Budget information if mentioned (extract numbers and currency)
 - **quantity**: Quantity required with units if mentioned
-- **location**: Location preference if mentioned
+- **location**: Location preference if mentioned (city, state, or region)
 
 **EXTRACTION RULES:**
 
@@ -125,15 +125,16 @@ Analyze the user's input and extract the following fields:
    - Set to null if not mentioned
 
 5. **Location:**
+   - IMPORTANT: Only extract if EXPLICITLY mentioned in the user's input
+   - Look for city names, state names, or regions like "Coimbatore", "Tamil Nadu", "South India"
    - Keep short: city name or state only
    - Format: "Coimbatore" or "TN" or "South India"
-   - Set to null if not mentioned
+   - Set to **null** if NOT mentioned (don't assume or infer location)
 
 **IMPORTANT:**
 - Set fields to null if information is NOT present in user input
 - Do not make assumptions or add information not provided
 - Extract only what the user explicitly states
-- Use professional textile industry language
 - Always return valid JSON format
 
 **RESPONSE FORMAT:**
@@ -186,6 +187,16 @@ Output:
   "budget": "2L",
   "quantity": "10K mtr",
   "location": "Tirupur"
+}
+
+Input: "I need cotton fabric 5000 meters, budget around 2 lakhs"
+Output:
+{
+  "title": "Cotton Fabric 5K mtr",
+  "description": "Need cotton fabric for manufacturing.",
+  "budget": "2L",
+  "quantity": "5K mtr",
+  "location": null
 }`;
   }
 

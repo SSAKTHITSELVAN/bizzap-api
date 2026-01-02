@@ -1,4 +1,4 @@
-// src/modules/leads/leads.controller.ts
+// src/modules/leads/admin.leads.controller.ts - FIXED for Swagger
 import { 
   Controller, 
   Get, 
@@ -31,390 +31,331 @@ import { UpdateLeadDto } from './dto/update-lead.dto';
 import { DeactivateLeadDto } from './dto/deactivate-lead.dto';
 import { JwtAuthGuard } from '../core/guards/jwt-auth.guard';
 
-@ApiTags('Leads')
-@Controller('leads')
+// ✅ FIX: Add the correct ApiTags decorator
+@ApiTags('Admin-Leads')
+@Controller('admin/leads')  // Note: admin prefix in route
+@UseGuards(JwtAuthGuard)     // All admin routes require authentication
+@ApiBearerAuth('JWT-auth')
 export class AdminLeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
-  // ========== PUBLIC ENDPOINTS ==========
+  // ===========================================================
+  // 🆕 ADMIN: CONSUMED LEAD STATUS & ANALYTICS ENDPOINTS
+  // ===========================================================
 
-  @Get('public')
-  @ApiOperation({ summary: 'Get all active leads (public endpoint)' })
-  @ApiResponse({ status: 200, description: 'Active leads retrieved successfully' })
-  async findAllPublic() {
-    const leads = await this.leadsService.findAll();
-    return {
-      message: 'Active leads retrieved successfully',
-      data: leads,
-    };
-  }
-
-  @Get('public/:id')
-  @ApiOperation({ summary: 'Get a single lead by ID (public endpoint)' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiResponse({ status: 200, description: 'Lead retrieved successfully' })
-  @ApiResponse({ status: 404, description: 'Lead not found' })
-  async findOnePublic(@Param('id') id: string) {
-    const lead = await this.leadsService.findOne(id);
-    return {
-      message: 'Lead retrieved successfully',
-      data: lead,
-    };
-  }
-
-  // ========== PROTECTED ENDPOINTS ==========
-  // IMPORTANT: Place specific routes BEFORE parameterized routes like ':id'
-
-  @Post()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @UseInterceptors(FileInterceptor('image'))
-  @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Create a new lead with optional image upload' })
-  @ApiBody({
-    description: 'Lead details with optional image',
+  @Get('consumed-leads')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get all consumed leads with status',
+    description: 'Returns all consumed leads across all companies with deal status tracking'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'All consumed leads retrieved successfully',
     schema: {
       type: 'object',
       properties: {
-        title: {
-          type: 'string',
-          description: 'Lead title',
-          example: 'Looking for Web Development Services',
-        },
-        description: {
-          type: 'string',
-          description: 'Detailed description',
-          example: 'We need a professional website for our startup',
-        },
-        budget: {
-          type: 'string',
-          description: 'Budget for the lead',
-          example: '$5000',
-        },
-        quantity: {
-          type: 'string',
-          description: 'Quantity required',
-          example: '1',
-        },
-        location: {
-          type: 'string',
-          description: 'Location',
-          example: 'San Francisco',
-        },
-        image: {
-          type: 'string',
-          format: 'binary',
-          description: 'Lead image (JPG, PNG, WebP, max 10MB)',
-        },
-      },
-      required: ['title', 'description'],
-    },
-  })
-  @ApiResponse({ status: 201, description: 'Lead created successfully' })
-  @ApiResponse({ status: 400, description: 'Bad request' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async create(
-    @Request() req,
-    @Body() createLeadDto: CreateLeadDto,
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }), // 10MB
-          new FileTypeValidator({ fileType: /(image\/(jpeg|jpg|png|webp))/ }),
-        ],
-        fileIsRequired: false,
-      }),
-    )
-    image?: Express.Multer.File,
-  ) {
-    const lead = await this.leadsService.create(req.user.companyId, createLeadDto, image);
-    return {
-      message: 'Lead created successfully',
-      data: lead,
-    };
-  }
-
-  @Get('my-leads')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Get all leads (active + inactive) created by authenticated company' })
-  @ApiResponse({ status: 200, description: 'Company leads retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async findMyLeads(@Request() req) {
-    const leads = await this.leadsService.findByCompany(req.user.companyId);
-    return {
-      message: 'Your leads retrieved successfully',
-      data: leads,
-    };
-  }
-
-  @Get('my-leads/active')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Get only active leads created by authenticated company' })
-  @ApiResponse({ status: 200, description: 'Active company leads retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async findMyActiveLeads(@Request() req) {
-    const leads = await this.leadsService.findActiveByCompany(req.user.companyId);
-    return {
-      message: 'Your active leads retrieved successfully',
-      data: leads,
-    };
-  }
-
-  @Get('my-leads/inactive')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Get only inactive/deactivated leads created by authenticated company' })
-  @ApiResponse({ status: 200, description: 'Inactive company leads retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async findMyInactiveLeads(@Request() req) {
-    const leads = await this.leadsService.findInactiveByCompany(req.user.companyId);
-    return {
-      message: 'Your inactive leads retrieved successfully',
-      data: leads,
-    };
-  }
-
-  // Place :id routes AFTER all specific routes
-  @Get(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Get a single lead by ID (protected)' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiResponse({ status: 200, description: 'Lead retrieved successfully' })
-  @ApiResponse({ status: 404, description: 'Lead not found' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async findOne(@Param('id') id: string) {
-    const lead = await this.leadsService.findOne(id);
-    return {
-      message: 'Lead retrieved successfully',
-      data: lead,
-    };
-  }
-
-  @Get(':id/image')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Get signed URL for lead image' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiResponse({ status: 200, description: 'Image URL generated successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 404, description: 'Lead or image not found' })
-  async getLeadImage(@Param('id') id: string) {
-    const imageUrl = await this.leadsService.getLeadImageUrl(id);
-    return {
-      message: 'Image URL generated successfully',
-      data: { imageUrl },
-    };
-  }
-
-  @Patch(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @UseInterceptors(FileInterceptor('image'))
-  @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Update a lead with optional new image' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiBody({
-    description: 'Lead update details with optional image',
-    schema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', example: 'Updated Lead Title' },
-        description: { type: 'string', example: 'Updated description' },
-        budget: { type: 'string', example: '$6000' },
-        quantity: { type: 'string', example: '2' },
-        location: { type: 'string', example: 'New York' },
-        image: {
-          type: 'string',
-          format: 'binary',
-          description: 'New lead image (replaces existing)',
-        },
-      },
-    },
-  })
-  @ApiResponse({ status: 200, description: 'Lead updated successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
-  @ApiResponse({ status: 404, description: 'Lead not found' })
-  async update(
-    @Request() req,
-    @Param('id') id: string,
-    @Body() updateLeadDto: UpdateLeadDto,
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }), // 10MB
-          new FileTypeValidator({ fileType: /(image\/(jpeg|jpg|png|webp))/ }),
-        ],
-        fileIsRequired: false,
-      }),
-    )
-    image?: Express.Multer.File,
-  ) {
-    const lead = await this.leadsService.update(id, req.user.companyId, updateLeadDto, image);
-    return {
-      message: 'Lead updated successfully',
-      data: lead,
-    };
-  }
-
-  @Patch(':id/toggle-status')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Toggle lead active/inactive status' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiBody({
-    description: 'Active status',
-    schema: {
-      type: 'object',
-      properties: {
-        isActive: {
-          type: 'boolean',
-          description: 'Set to true to activate, false to deactivate',
-          example: true,
-        },
-      },
-      required: ['isActive'],
-    },
-  })
-  @ApiResponse({ status: 200, description: 'Lead status toggled successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
-  async toggleStatus(@Request() req, @Param('id') id: string, @Body('isActive') isActive: boolean) {
-    const lead = await this.leadsService.toggleActiveStatus(id, req.user.companyId, isActive);
-    return {
-      message: `Lead ${isActive ? 'activated' : 'deactivated'} successfully`,
-      data: lead,
-    };
-  }
-
-  @Patch(':id/deactivate')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Deactivate a lead with optional reason' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiBody({
-    description: 'Deactivation reason',
-    schema: {
-      type: 'object',
-      properties: {
-        reasonForDeactivation: {
-          type: 'string',
-          description: 'Reason for deactivating the lead',
-          example: 'Lead fulfilled',
-        },
-      },
-    },
-  })
-  @ApiResponse({ status: 200, description: 'Lead deactivated successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
-  async deactivate(
-    @Request() req,
-    @Param('id') id: string,
-    @Body() deactivateDto: DeactivateLeadDto,
-  ) {
-    const lead = await this.leadsService.deactivateLeadWithReason(
-      id,
-      req.user.companyId,
-      deactivateDto.reasonForDeactivation,
-    );
-    return {
-      message: 'Lead deactivated successfully',
-      data: lead,
-    };
-  }
-
-  @Post(':id/consume')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Consume a lead to get contact details' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiResponse({ status: 200, description: 'Lead consumed successfully or insufficient quota' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Cannot consume own lead or insufficient leads' })
-  async consumeLead(@Request() req, @Param('id') id: string) {
-    const result = await this.leadsService.consumeLead(id, req.user.companyId);
-    if (!result.success) {
-      return {
-        message: 'Insufficient leads to consume',
-        data: null,
-      };
+        message: { type: 'string' },
+        data: { 
+          type: 'array',
+          description: 'List of all consumed leads with status'
+        }
+      }
     }
-    return {
-      message: 'Lead consumed successfully',
-      data: { contact: result.contact },
-    };
-  }
-
-  @Delete(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({ summary: 'Delete a lead (soft delete)' })
-  @ApiParam({ name: 'id', description: 'Lead UUID' })
-  @ApiResponse({ status: 200, description: 'Lead deleted successfully' })
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  @ApiResponse({ status: 403, description: 'Forbidden - not your lead' })
-  async remove(@Request() req, @Param('id') id: string) {
-    await this.leadsService.remove(id, req.user.companyId);
+  async getAllConsumedLeadsWithStatus() {
+    const consumedLeads = await this.leadsService.getAllConsumedLeadsWithStatus();
     return {
-      message: 'Lead deleted successfully',
-      data: null,
+      message: 'All consumed leads retrieved successfully',
+      data: consumedLeads,
     };
   }
 
-  // Add these endpoints to admin.leads.controller.ts (ADMIN endpoints)
+  @Get('consumed-leads/metrics')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get comprehensive conversion metrics',
+    description: 'Returns overall conversion rates, deal values, and company performance metrics'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Conversion metrics retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            summary: {
+              type: 'object',
+              properties: {
+                totalConsumedLeads: { type: 'number', example: 150 },
+                pendingDeals: { type: 'number', example: 45 },
+                completedDeals: { type: 'number', example: 80 },
+                failedDeals: { type: 'number', example: 15 },
+                noResponseDeals: { type: 'number', example: 10 },
+                conversionRate: { type: 'string', example: '53.33%' },
+                totalDealValue: { type: 'string', example: '450000.00' },
+                averageDealValue: { type: 'string', example: '5625.00' }
+              }
+            },
+            topPerformingCompanies: {
+              type: 'array',
+              description: 'Companies with highest conversion rates (min 3 leads consumed)'
+            },
+            leadQualityByCompany: {
+              type: 'array',
+              description: 'Lead owners ranked by their lead quality/success rate'
+            }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getConsumedLeadMetrics() {
+    const metrics = await this.leadsService.getConsumedLeadMetrics();
+    return {
+      message: 'Conversion metrics retrieved successfully',
+      data: metrics,
+    };
+  }
 
-// ===========================================================
-// 🆕 ADMIN: CONSUMED LEAD STATUS & ANALYTICS ENDPOINTS
-// ===========================================================
+  @Get('consumed-leads/company/:companyId')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get consumed leads for a specific company',
+    description: 'Returns all leads consumed by a specific company with their deal statuses'
+  })
+  @ApiParam({ name: 'companyId', description: 'Company UUID' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Company consumed leads retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        data: {
+          type: 'array',
+          description: 'List of consumed leads for the specified company'
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 404, description: 'Company not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getCompanyConsumedLeads(@Param('companyId') companyId: string) {
+    const consumedLeads = await this.leadsService.getCompanyConsumedLeadsWithStatus(companyId);
+    return {
+      message: 'Company consumed leads retrieved successfully',
+      data: consumedLeads,
+    };
+  }
 
-@Get('admin/consumed-leads')
-@ApiOperation({ summary: 'Get all consumed leads with status (admin only)' })
-@ApiResponse({ status: 200, description: 'All consumed leads retrieved successfully' })
-async getAllConsumedLeadsWithStatus() {
-  const consumedLeads = await this.leadsService.getAllConsumedLeadsWithStatus();
-  return {
-    message: 'All consumed leads retrieved successfully',
-    data: consumedLeads,
-  };
-}
+  @Get('consumed-leads/company/:companyId/metrics')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get conversion metrics for a specific company',
+    description: 'Returns detailed conversion analytics for a single company'
+  })
+  @ApiParam({ name: 'companyId', description: 'Company UUID' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Company conversion metrics retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            companyId: { type: 'string' },
+            totalConsumedLeads: { type: 'number', example: 15 },
+            statusBreakdown: {
+              type: 'object',
+              properties: {
+                PENDING: { type: 'number', example: 3 },
+                COMPLETED: { type: 'number', example: 8 },
+                FAILED: { type: 'number', example: 2 },
+                NO_RESPONSE: { type: 'number', example: 2 }
+              }
+            },
+            conversionRate: { type: 'string', example: '53.33%' },
+            totalDealValue: { type: 'string', example: '125000.00' },
+            averageDealValue: { type: 'string', example: '15625.00' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getCompanyConversionMetrics(@Param('companyId') companyId: string) {
+    const metrics = await this.leadsService.getCompanyConversionMetrics(companyId);
+    return {
+      message: 'Company conversion metrics retrieved successfully',
+      data: metrics,
+    };
+  }
 
-@Get('admin/consumed-leads/metrics')
-@ApiOperation({ summary: 'Get comprehensive conversion metrics (admin only)' })
-@ApiResponse({ status: 200, description: 'Conversion metrics retrieved successfully' })
-async getConsumedLeadMetrics() {
-  const metrics = await this.leadsService.getConsumedLeadMetrics();
-  return {
-    message: 'Conversion metrics retrieved successfully',
-    data: metrics,
-  };
-}
+  // ===========================================================
+  // ADMIN: GENERAL LEAD ANALYTICS
+  // ===========================================================
 
-@Get('admin/consumed-leads/company/:companyId')
-@ApiOperation({ summary: 'Get consumed leads for a specific company (admin only)' })
-@ApiParam({ name: 'companyId', description: 'Company UUID' })
-@ApiResponse({ status: 200, description: 'Company consumed leads retrieved successfully' })
-@ApiResponse({ status: 404, description: 'Company not found' })
-async getCompanyConsumedLeads(@Param('companyId') companyId: string) {
-  const consumedLeads = await this.leadsService.getCompanyConsumedLeadsWithStatus(companyId);
-  return {
-    message: 'Company consumed leads retrieved successfully',
-    data: consumedLeads,
-  };
-}
+  @Get('analytics/most-consumed')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get most consumed leads',
+    description: 'Returns leads with highest consumption count'
+  })
+  @ApiResponse({ status: 200, description: 'Most consumed leads retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMostConsumedLeads() {
+    const leads = await this.leadsService.getMostConsumedLeads(10);
+    return {
+      message: 'Most consumed leads retrieved successfully',
+      data: leads,
+    };
+  }
 
-@Get('admin/consumed-leads/company/:companyId/metrics')
-@ApiOperation({ summary: 'Get conversion metrics for a specific company (admin only)' })
-@ApiParam({ name: 'companyId', description: 'Company UUID' })
-@ApiResponse({ status: 200, description: 'Company conversion metrics retrieved successfully' })
-async getCompanyConversionMetrics(@Param('companyId') companyId: string) {
-  const metrics = await this.leadsService.getCompanyConversionMetrics(companyId);
-  return {
-    message: 'Company conversion metrics retrieved successfully',
-    data: metrics,
-  };
-}
+  @Get('analytics/most-viewed')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get most viewed leads',
+    description: 'Returns leads with highest view count'
+  })
+  @ApiResponse({ status: 200, description: 'Most viewed leads retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getMostViewedLeads() {
+    const leads = await this.leadsService.getMostViewedLeads(10);
+    return {
+      message: 'Most viewed leads retrieved successfully',
+      data: leads,
+    };
+  }
+
+  @Get('analytics/by-location')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get leads grouped by location',
+    description: 'Returns lead distribution by location'
+  })
+  @ApiResponse({ status: 200, description: 'Leads by location retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getLeadsByLocation() {
+    const locations = await this.leadsService.getLeadsByLocation();
+    return {
+      message: 'Leads by location retrieved successfully',
+      data: locations,
+    };
+  }
+
+  @Get('analytics/deactivated')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get all deactivated/inactive leads',
+    description: 'Returns leads that have been deactivated with reasons'
+  })
+  @ApiResponse({ status: 200, description: 'Deactivated leads retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getDeactivatedLeads() {
+    const result = await this.leadsService.getAllDeactivatedLeads();
+    return {
+      message: 'Deactivated leads retrieved successfully',
+      data: result,
+    };
+  }
+
+  @Get('analytics/deactivated/by-reason')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get deactivated leads grouped by reason',
+    description: 'Returns count of deactivated leads by deactivation reason'
+  })
+  @ApiResponse({ status: 200, description: 'Deactivation reasons retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getDeactivatedLeadsByReason() {
+    const reasons = await this.leadsService.getDeactivatedLeadsByReason();
+    return {
+      message: 'Deactivated leads by reason retrieved successfully',
+      data: reasons,
+    };
+  }
+
+  @Get('analytics/count-by-date')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get lead count by date',
+    description: 'Returns daily lead creation counts'
+  })
+  @ApiResponse({ status: 200, description: 'Lead counts by date retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getLeadCountByDate() {
+    const counts = await this.leadsService.getLeadCountByDate();
+    return {
+      message: 'Lead count by date retrieved successfully',
+      data: counts,
+    };
+  }
+
+  @Get('analytics/count-by-month')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get lead count by month',
+    description: 'Returns monthly lead creation counts'
+  })
+  @ApiResponse({ status: 200, description: 'Lead counts by month retrieved' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getLeadCountByMonth() {
+    const counts = await this.leadsService.getLeadCountByMonth();
+    return {
+      message: 'Lead count by month retrieved successfully',
+      data: counts,
+    };
+  }
+
+  @Get('analytics/summary')
+  @ApiOperation({ 
+    summary: '[ADMIN] Get overall lead analytics summary',
+    description: 'Returns comprehensive lead statistics and metrics'
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Lead analytics summary retrieved',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        data: {
+          type: 'object',
+          properties: {
+            totalLeads: { type: 'number', example: 250 },
+            totalActiveLeads: { type: 'number', example: 180 },
+            totalConsumedLeads: { type: 'number', example: 450 },
+            conversionRate: { 
+              type: 'object',
+              properties: {
+                totalLeads: { type: 'number' },
+                consumedLeads: { type: 'number' },
+                conversionRate: { type: 'string', example: '72.00%' }
+              }
+            },
+            averageLeadLifespan: { type: 'number', example: 15, description: 'Days' },
+            averageConsumptionsPerLead: { type: 'string', example: '1.8' }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getLeadAnalyticsSummary() {
+    const totalLeads = await this.leadsService.getTotalLeadCount();
+    const totalActiveLeads = await this.leadsService.getTotalActiveLeads();
+    const totalConsumedLeads = await this.leadsService.getTotalConsumedLeads();
+    const conversionRate = await this.leadsService.getLeadConversionRate();
+    const averageLifespan = await this.leadsService.getAverageLeadLifespan();
+    const avgConsumptions = await this.leadsService.getAverageConsumptionsPerCompany();
+
+    return {
+      message: 'Lead analytics summary retrieved successfully',
+      data: {
+        totalLeads,
+        totalActiveLeads,
+        totalConsumedLeads,
+        conversionRate,
+        averageLeadLifespan: averageLifespan,
+        averageConsumptionsPerLead: avgConsumptions,
+      },
+    };
+  }
 }

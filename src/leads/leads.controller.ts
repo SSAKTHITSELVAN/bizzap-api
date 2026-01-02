@@ -113,12 +113,14 @@ export class LeadsController {
     };
   }
 
+  // Update this endpoint in leads.controller.ts
+
   @Post('extract-from-text')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ 
     summary: 'Extract lead details from natural language text using AI',
-    description: 'Provide a natural language description of your business requirement and get structured lead data back'
+    description: 'Provide a natural language description of your business requirement and get structured lead data back. If location is not mentioned, your company location will be used automatically.'
   })
   @ApiBody({ type: ExtractLeadFromTextDto })
   @ApiResponse({ 
@@ -135,7 +137,7 @@ export class LeadsController {
             description: { type: 'string', example: 'Need cotton fabric for manufacturing unit.', nullable: true },
             budget: { type: 'string', example: '2L', nullable: true },
             quantity: { type: 'string', example: '5K mtr', nullable: true },
-            location: { type: 'string', example: 'Coimbatore', nullable: true },
+            location: { type: 'string', example: 'Coimbatore', description: 'Uses company location if not specified in text' },
           }
         }
       }
@@ -143,9 +145,23 @@ export class LeadsController {
   })
   @ApiResponse({ status: 400, description: 'Bad request - Invalid input' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async extractLeadFromText(@Body() extractDto: ExtractLeadFromTextDto) {
+  async extractLeadFromText(
+    @Request() req,
+    @Body() extractDto: ExtractLeadFromTextDto
+  ) {
+    // ✅ Step 1: Get company location from token
+    const company = await this.leadsService['companyService'].findOne(req.user.companyId);
+    const companyLocation = company.address || company.operationalAddress || company.registeredAddress || null;
+    
+    // ✅ Step 2: Append company location to user input (if available)
+    let enhancedInput = extractDto.userInput;
+    if (companyLocation) {
+      enhancedInput = `${extractDto.userInput} in ${companyLocation}`;
+    }
+    
+    // ✅ Step 3: Send enhanced input to AI (now includes location)
     const extractedData = await this.aiLeadExtractionService.extractLeadDetails(
-      extractDto.userInput
+      enhancedInput
     );
     
     return {

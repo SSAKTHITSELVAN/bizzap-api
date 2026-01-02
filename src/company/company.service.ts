@@ -1,4 +1,4 @@
-// src/modules/company/company.service.ts - Simplified without payments
+// src/modules/company/company.service.ts - Updated with monthly lead consumption reset
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
@@ -22,29 +22,32 @@ export class CompanyService {
   ) {}
 
   /**
-   * CRON JOB: Reset monthly quotas on the 1st of every month
+   * 🔄 CRON JOB: Reset monthly lead consumption on the 1st of every month
+   * - Reset leadQuota to 5 (base monthly allowance)
+   * - Reset consumedLeads to 0
+   * - Keep postedLeads reset as before
    */
   @Cron('0 0 1 * *') // Run at midnight on the 1st of every month
   async resetMonthlyQuotas() {
-    console.log('Resetting monthly quotas...');
+    console.log('🔄 Starting monthly quota reset...');
     
     const allCompanies = await this.companyRepository.find({
       where: { isDeleted: false },
     });
 
     for (const company of allCompanies) {
-      // Reset consumed leads and posted leads
+      // ✅ Reset lead consumption to base 5 leads per month
+      company.leadQuota = 5;
       company.consumedLeads = 0;
+      
+      // Reset posted leads counter
       company.postedLeads = 0;
       
-      // Add 10 free leads for the new month
-      company.leadQuota = company.leadQuota + 10;
-      
       await this.companyRepository.save(company);
-      console.log(`Reset quotas for company ${company.id}`);
+      console.log(`✅ Reset quotas for company ${company.companyName} (${company.id})`);
     }
 
-    console.log(`Reset quotas for ${allCompanies.length} companies`);
+    console.log(`✅ Monthly reset complete for ${allCompanies.length} companies`);
   }
 
   /**
@@ -67,8 +70,9 @@ export class CompanyService {
     
     return companyObj;
   }
+
   /**
-   * Get detailed lead quota information for a company
+   * 📊 Get detailed lead quota information for a company
    */
   async getLeadQuotaDetails(companyId: string): Promise<LeadQuotaDetailsDto> {
     const company = await this.findOne(companyId);
@@ -91,7 +95,7 @@ export class CompanyService {
       nextResetDate,
       daysUntilReset,
       referralCode: company.referralCode,
-      referralInfo: 'Share your referral code to earn 5 bonus leads per successful referral! New users also get 5 bonus leads.',
+      referralInfo: 'Share your referral code to earn 2 bonus leads per successful referral! You start with 5 leads each month.',
     };
   }
 
@@ -111,7 +115,6 @@ export class CompanyService {
     const oldKeys: string[] = [];
 
     try {
-      // Only update userPhoto if a new file is uploaded
       if (files?.userPhoto?.[0]) {
         if (company.userPhoto && this.s3Service.isS3Key(company.userPhoto)) {
           oldKeys.push(company.userPhoto);
@@ -121,7 +124,6 @@ export class CompanyService {
         delete updateCompanyDto.userPhoto;
       }
 
-      // Only update logo if a new file is uploaded
       if (files?.logo?.[0]) {
         if (company.logo && this.s3Service.isS3Key(company.logo)) {
           oldKeys.push(company.logo);
@@ -131,7 +133,6 @@ export class CompanyService {
         delete updateCompanyDto.logo;
       }
 
-      // Only update coverImage if a new file is uploaded
       if (files?.coverImage?.[0]) {
         if (company.coverImage && this.s3Service.isS3Key(company.coverImage)) {
           oldKeys.push(company.coverImage);
@@ -141,11 +142,9 @@ export class CompanyService {
         delete updateCompanyDto.coverImage;
       }
 
-      // Apply only the fields that were explicitly provided
       Object.assign(company, updateCompanyDto);
       const savedCompany = await this.companyRepository.save(company);
 
-      // Delete old files from S3 after successful update
       for (const key of oldKeys) {
         try {
           await this.s3Service.deleteFile(key);
@@ -161,7 +160,9 @@ export class CompanyService {
   }
 
   /**
-   * Create a new company with referral bonus
+   * 🎁 Create a new company with referral bonus
+   * - New user gets 5 base leads + 2 bonus leads if referred = 7 leads
+   * - Referrer gets +2 leads added to their current month quota
    */
   async create(createCompanyDto: CreateCompanyDto): Promise<Company> {
     // Check if GST or phone number already exists
@@ -180,23 +181,25 @@ export class CompanyService {
     }
 
     const referralCode = this.generateReferralCode();
-    let leadQuota = 10; // Default 10 free leads
+    let leadQuota = 5; // Base 5 leads per month
 
     // Handle referral bonus
     if (createCompanyDto.referredBy) {
       const referrer = await this.companyRepository.findOne({ 
-        where: { referralCode: createCompanyDto.referredBy } 
+        where: { referralCode: createCompanyDto.referredBy, isDeleted: false } 
       });
       
       if (referrer) {
-        // Add 5 bonus leads to new user
-        leadQuota = 15;
+        // ✅ Add 2 bonus leads to new user (5 base + 2 bonus = 7 total)
+        leadQuota = 7;
         
-        // Add 5 bonus leads to referrer
-        referrer.leadQuota += 5;
+        // ✅ Add 2 bonus leads to referrer's current month quota
+        referrer.leadQuota += 2;
         await this.companyRepository.save(referrer);
         
-        console.log(`Referral bonus: +5 leads to new user, +5 leads to referrer ${referrer.id}`);
+        console.log(`🎁 Referral bonus applied: New user gets 7 leads (5+2), Referrer ${referrer.companyName} gets +2 leads`);
+      } else {
+        console.log(`⚠️ Invalid referral code: ${createCompanyDto.referredBy}`);
       }
     }
 
@@ -231,19 +234,24 @@ export class CompanyService {
   }
 
   /**
-   * Consume a lead (deduct from quota)
+   * 🔑 Consume a lead (deduct from monthly quota)
+   * Returns false if no leads available
    */
   async consumeLead(companyId: string): Promise<boolean> {
     const company = await this.findOne(companyId);
     
+    // ✅ Check if company has leads remaining this month
     if (company.consumedLeads >= company.leadQuota) {
+      console.log(`❌ Company ${company.companyName} has exhausted monthly lead quota (${company.consumedLeads}/${company.leadQuota})`);
       return false; // No leads available
     }
     
+    // ✅ Deduct 1 lead from available quota
     await this.companyRepository.update(companyId, {
       consumedLeads: company.consumedLeads + 1,
     });
     
+    console.log(`✅ Lead consumed by ${company.companyName}. Remaining: ${company.leadQuota - company.consumedLeads - 1}/${company.leadQuota}`);
     return true;
   }
 
@@ -316,7 +324,6 @@ export class CompanyService {
   async remove(id: string): Promise<void> {
     const company = await this.findOne(id);
     
-    // Delete S3 assets
     try {
       if (company.logo && this.s3Service.isS3Key(company.logo)) {
         await this.s3Service.deleteFile(company.logo);
@@ -338,7 +345,7 @@ export class CompanyService {
    * Generate unique referral code
    */
   private generateReferralCode(): string {
-    return uuidv4().substring(0, 8).toUpperCase();
+    return `BIZ${uuidv4().substring(0, 6).toUpperCase()}`;
   }
 
   // ============================================
