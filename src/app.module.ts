@@ -1,10 +1,18 @@
-// src/app.module.ts - Updated with NotificationsModule
+
+// ============================================
+// FILE 2: src/app.module.ts (UPDATE)
+// Make sure AppController is included
+// ============================================
+
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
 import { typeOrmConfig } from './database/typeorm.config';
 import { ScheduleModule } from '@nestjs/schedule';
+
+// Controllers
+import { AppController } from './app.controller'; // ADD THIS
 
 // Modules
 import { AuthModule } from './auth/auth.module';
@@ -39,5 +47,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     SubscriptionModule,
     NotificationsModule,
   ],
+  controllers: [AppController], // ADD THIS
 })
 export class AppModule {}
+
