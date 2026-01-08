@@ -39,8 +39,8 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
     ExpoPushToken
   ],
   synchronize: true,
-  // logging: false,
-  // ssl: {
-  //   rejectUnauthorized: false
-  // },
+  logging: false,
+  ssl: {
+    rejectUnauthorized: false
+  },
 };
