@@ -1,23 +1,25 @@
-// ============================================
-// FILE 1: src/app.controller.ts
-// Add these endpoints to serve deep linking files
-// ============================================
-
-import { Controller, Get, Header } from '@nestjs/common';
+import { Controller, Get, Header, UseInterceptors } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 
-@ApiExcludeController() // Hide from Swagger docs
+// Create a custom decorator to bypass the response interceptor
+export const BypassInterceptor = () => UseInterceptors();
+
+@ApiExcludeController()
 @Controller()
 export class AppController {
   
   /**
    * Serve Android Digital Asset Links
    * Endpoint: GET /.well-known/assetlinks.json
+   * 
+   * CRITICAL: Must return raw JSON array, not wrapped response
    */
   @Get('.well-known/assetlinks.json')
+  @BypassInterceptor() // Skip ResponseInterceptor
   @Header('Content-Type', 'application/json')
   @Header('Access-Control-Allow-Origin', '*')
   getAssetLinks() {
+    // Return RAW array - no wrapper object
     return [
       {
         relation: ['delegate_permission/common.handle_all_urls'],
@@ -36,13 +38,16 @@ export class AppController {
    * Serve iOS Universal Links (Apple App Site Association)
    * Endpoint: GET /.well-known/apple-app-site-association
    * 
+   * CRITICAL: Must return raw JSON object, not wrapped response
    * IMPORTANT: Replace YOUR_TEAM_ID with your actual Apple Team ID
    * Find it at: https://developer.apple.com/account (Membership section)
    */
   @Get('.well-known/apple-app-site-association')
+  @BypassInterceptor() // Skip ResponseInterceptor
   @Header('Content-Type', 'application/json')
   @Header('Access-Control-Allow-Origin', '*')
   getAppleAppSiteAssociation() {
+    // Return RAW object - no wrapper
     return {
       applinks: {
         apps: [],
@@ -67,4 +72,3 @@ export class AppController {
     return 'Bizzap API is running!';
   }
 }
-
