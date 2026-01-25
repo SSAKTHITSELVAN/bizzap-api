@@ -12,6 +12,7 @@ import { PostComment } from '../posts/entities/post-comment.entity';
 import { PostSave } from '../posts/entities/post-save.entity';
 import { ExpoPushToken } from 'src/notifications/entities/expo-push-token.entity';
 import { Notification } from 'src/notifications/entities/notification.entity';
+import { AnalyticsLog } from '../analytics/entities/analytics-log.entity'; // Import the new entity
 
 // Load environment variables
 import * as dotenv from 'dotenv';
@@ -36,7 +37,8 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
     PostComment,
     PostSave,
     Notification, 
-    ExpoPushToken
+    ExpoPushToken,
+    AnalyticsLog
   ],
   synchronize: true,
   logging: false,
