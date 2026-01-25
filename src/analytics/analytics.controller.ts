@@ -1,23 +1,48 @@
 // src/analytics/analytics.controller.ts
-import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Req, UseGuards, Query } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { CreateAnalyticsDto } from './dto/create-analytics.dto';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
-// Assuming you have a standard JwtAuthGuard (standard in NestJS auth setups)
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport'; 
 
 @ApiTags('Analytics')
-@ApiBearerAuth('JWT-auth')
 @Controller('analytics')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Post('track')
-  @UseGuards(AuthGuard('jwt')) // Ensures we know WHO the user is
-  @ApiOperation({ summary: 'Log user screen time and activity' })
+  @ApiOperation({ summary: 'Log user screen time (entry/exit)' })
   async trackScreenView(@Body() createAnalyticsDto: CreateAnalyticsDto, @Req() req) {
-    // req.user is populated by the JWT Guard from your auth module
     const userId = req.user.id; 
     return this.analyticsService.logScreenView(userId, createAnalyticsDto);
+  }
+
+  @Get('dashboard/screens')
+  @ApiOperation({ summary: 'Get popularity and avg time for all screens' })
+  async getScreenAnalytics() {
+    return this.analyticsService.getScreenAnalytics();
+  }
+
+  @Get('dashboard/active-users')
+  @ApiOperation({ summary: 'Get list of users active in the last 5 minutes' })
+  async getActiveUsers() {
+    return this.analyticsService.getActiveUsers();
+  }
+
+  @Get('dashboard/user-engagement')
+  @ApiOperation({ summary: 'Top users by time spent with detailed breakdown' })
+  @ApiQuery({ name: 'period', enum: ['day', 'week', 'month'], required: true })
+  @ApiQuery({ name: 'userId', required: false, description: 'Filter by specific User ID' })
+  async getUserEngagement(
+    @Query('period') period: 'day' | 'week' | 'month',
+    @Query('userId') userId?: string
+  ) {
+    return this.analyticsService.getUserEngagement(period, userId);
+  }
+
+  @Get('dashboard/live-distribution')
+  @ApiOperation({ summary: 'Count and list of active users per screen' })
+  async getLiveDistribution() {
+    return this.analyticsService.getCurrentUserDistribution();
   }
 }
