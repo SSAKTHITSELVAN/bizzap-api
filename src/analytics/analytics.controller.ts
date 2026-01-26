@@ -15,7 +15,7 @@ export class AnalyticsController {
   @ApiOperation({ summary: 'Log user screen time (entry/exit)' })
   async trackScreenView(@Body() createAnalyticsDto: CreateAnalyticsDto, @Req() req) {
     // Now req.user is guaranteed to exist
-    const userId = req.user.id; 
+    const userId = req.user.companyId;
     return this.analyticsService.logScreenView(userId, createAnalyticsDto);
   }
 
