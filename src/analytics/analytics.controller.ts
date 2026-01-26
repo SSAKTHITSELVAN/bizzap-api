@@ -1,44 +1,56 @@
-import { Controller, Post, Get, Body, Req, UseGuards, Query } from '@nestjs/common';
+// src/analytics/analytics.controller.ts
+import { Controller, Post, Get, Body, Req, UseGuards, Query, Logger } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { CreateAnalyticsDto } from './dto/create-analytics.dto';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport'; // 👈 Ensure this is imported
+import { AuthGuard } from '@nestjs/passport'; 
 
 @ApiTags('Analytics')
-@ApiBearerAuth('JWT-auth') // 👈 This is just for Swagger UI documentation
+@ApiBearerAuth('JWT-auth')
 @Controller('analytics')
 export class AnalyticsController {
+  private readonly logger = new Logger(AnalyticsController.name);
+
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Post('track')
-  @UseGuards(AuthGuard('jwt')) // 👈 THIS WAS MISSING. It creates req.user
+  @UseGuards(AuthGuard('jwt')) 
   @ApiOperation({ summary: 'Log user screen time (entry/exit)' })
   async trackScreenView(@Body() createAnalyticsDto: CreateAnalyticsDto, @Req() req) {
-    // Now req.user is guaranteed to exist
-    const userId = req.user.companyId;
+    // 🔍 Debug: Print the user object to console if you still have issues
+    // console.log('Authenticated User Payload:', req.user);
+
+    // ✅ FIX: Use companyId because your JWT token uses 'companyId'
+    // Fallback to 'id' just in case the strategy changes later
+    const userId = req.user.companyId || req.user.id; 
+
+    if (!userId) {
+      this.logger.error('User ID not found in token payload', req.user);
+      // This prevents the DB error by catching it early
+      throw new Error('User ID missing from authentication token');
+    }
+
     return this.analyticsService.logScreenView(userId, createAnalyticsDto);
   }
 
+  // ... (Keep the GET endpoints below)
   
   @Get('dashboard/screens')
-  @UseGuards(AuthGuard('jwt')) // 👈 Good practice to secure these too
-  @ApiOperation({ summary: 'Get popularity and avg time for all screens' })
+  @UseGuards(AuthGuard('jwt'))
   async getScreenAnalytics() {
     return this.analyticsService.getScreenAnalytics();
   }
 
   @Get('dashboard/active-users')
   @UseGuards(AuthGuard('jwt'))
-  @ApiOperation({ summary: 'Get list of users active in the last 5 minutes' })
   async getActiveUsers() {
     return this.analyticsService.getActiveUsers();
   }
 
   @Get('dashboard/user-engagement')
   @UseGuards(AuthGuard('jwt'))
-  @ApiOperation({ summary: 'Top users by time spent with detailed breakdown' })
   @ApiQuery({ name: 'period', enum: ['day', 'week', 'month'], required: true })
-  @ApiQuery({ name: 'userId', required: false, description: 'Filter by specific User ID' })
+  @ApiQuery({ name: 'userId', required: false })
   async getUserEngagement(
     @Query('period') period: 'day' | 'week' | 'month',
     @Query('userId') userId?: string
@@ -48,7 +60,6 @@ export class AnalyticsController {
 
   @Get('dashboard/live-distribution')
   @UseGuards(AuthGuard('jwt'))
-  @ApiOperation({ summary: 'Count and list of active users per screen' })
   async getLiveDistribution() {
     return this.analyticsService.getCurrentUserDistribution();
   }
