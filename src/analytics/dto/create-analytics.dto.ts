@@ -1,5 +1,5 @@
 // src/analytics/dto/create-analytics.dto.ts
-import { IsString, IsDateString, IsNumber, IsNotEmpty } from 'class-validator';
+import { IsString, IsDateString, IsNumber, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateAnalyticsDto {
@@ -8,15 +8,16 @@ export class CreateAnalyticsDto {
   @IsNotEmpty()
   screenName: string;
 
-  @ApiProperty({ example: '2026-01-25T10:00:00.000Z' })
+  @ApiProperty()
   @IsDateString()
   entryTime: string;
 
-  @ApiProperty({ example: '2026-01-25T10:00:05.000Z' })
+  @ApiProperty()
   @IsDateString()
   exitTime: string;
 
-  @ApiProperty({ example: 5000, description: 'Duration in milliseconds' })
+  @ApiProperty({ required: false })
   @IsNumber()
-  durationMs: number;
+  @IsOptional() // 👈 Make this optional
+  durationMs?: number;
 }
