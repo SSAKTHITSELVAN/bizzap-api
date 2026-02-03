@@ -1,18 +1,16 @@
- // src/modules/notifications/notifications.service.ts
-
-
-// import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+//  // src/modules/notifications/notifications.service.ts
+//  import { Injectable, Logger } from '@nestjs/common';
 // import { InjectRepository } from '@nestjs/typeorm';
-// import { Repository, Not, In } from 'typeorm';
+// import { Repository, In } from 'typeorm';
 // import { Notification, NotificationType } from './entities/notification.entity';
 // import { ExpoPushToken } from './entities/expo-push-token.entity';
 // import { Company } from '../company/entities/company.entity';
-// import { Expo, ExpoPushMessage } from 'expo-server-sdk';
+// import { Expo, ExpoPushMessage, ExpoPushTicket } from 'expo-server-sdk';
 
 // @Injectable()
 // export class NotificationsService {
 //   private readonly logger = new Logger(NotificationsService.name);
-//   private expo: Expo;
+//   private expo = new Expo();
 
 //   constructor(
 //     @InjectRepository(Notification)
@@ -21,174 +19,211 @@
 //     private expoPushTokenRepository: Repository<ExpoPushToken>,
 //     @InjectRepository(Company)
 //     private companyRepository: Repository<Company>,
-//   ) {
-//     this.expo = new Expo();
-//   }
+//   ) {}
 
-//   /**
-//    * Register or update a push token
-//    */
-//   async registerPushToken(
+//   // ==========================================
+//   // 1. TOKEN MANAGEMENT
+//   // ==========================================
+
+//   async registerToken(
 //     companyId: string,
 //     token: string,
 //     deviceId?: string,
 //     platform?: string,
-//   ): Promise<ExpoPushToken | null> {
-//     try {
-//       const existingToken = await this.expoPushTokenRepository.findOne({ where: { token } });
+//   ) {
+//     if (!Expo.isExpoPushToken(token)) {
+//       this.logger.error(`Invalid Expo Push Token: ${token}`);
+//       return null;
+//     }
 
-//       if (existingToken) {
-//         existingToken.companyId = companyId;
-//         existingToken.deviceId = deviceId;
-//         existingToken.platform = platform || 'unknown';
-//         existingToken.isActive = true;
-//         return await this.expoPushTokenRepository.save(existingToken);
-//       }
+//     let tokenEntity = await this.expoPushTokenRepository.findOne({
+//       where: { token },
+//     });
 
-//       const newToken = this.expoPushTokenRepository.create({
+//     if (tokenEntity) {
+//       tokenEntity.companyId = companyId;
+//       tokenEntity.deviceId = deviceId;
+//       tokenEntity.platform = platform;
+//       tokenEntity.isActive = true;
+//       tokenEntity.updatedAt = new Date();
+//     } else {
+//       tokenEntity = this.expoPushTokenRepository.create({
 //         companyId,
 //         token,
 //         deviceId,
-//         platform: platform || 'unknown',
+//         platform,
 //         isActive: true,
 //       });
-
-//       return await this.expoPushTokenRepository.save(newToken);
-//     } catch (error) {
-//       this.logger.error(`Error registering token: ${error.message}`);
-//       return null;
 //     }
+
+//     return this.expoPushTokenRepository.save(tokenEntity);
 //   }
 
-//   async unregisterPushToken(token: string): Promise<void> {
-//     await this.expoPushTokenRepository.update({ token }, { isActive: false });
+//   async unregisterToken(token: string) {
+//     await this.expoPushTokenRepository.delete({ token });
 //   }
 
-//   /**
-//    * Internal helper for Expo Push
-//    */
-//   async sendPushNotifications(tokens: string[], title: string, body: string, data?: any): Promise<void> {
-//     const validTokens = tokens.filter(token => Expo.isExpoPushToken(token));
-//     if (validTokens.length === 0) return;
+//   // ==========================================
+//   // 2. SENDING NOTIFICATIONS (CORE LOGIC)
+//   // ==========================================
 
-//     const messages: ExpoPushMessage[] = validTokens.map(token => ({
-//       to: token,
-//       sound: 'default',
-//       title,
-//       body,
-//       data: data || {},
-//       priority: 'high',
-//       channelId: 'default',
-//     }));
+//   private async sendPushNotifications(
+//     tokens: string[],
+//     title: string,
+//     body: string,
+//     data: any = {},
+//   ) {
+//     if (tokens.length === 0) return;
+
+//     const messages: ExpoPushMessage[] = [];
+
+//     for (const token of tokens) {
+//       if (!Expo.isExpoPushToken(token)) continue;
+//       messages.push({
+//         to: token,
+//         sound: 'default',
+//         title: title,
+//         body: body,
+//         data: data,
+//         priority: 'high',
+//         channelId: 'default',
+//       });
+//     }
 
 //     const chunks = this.expo.chunkPushNotifications(messages);
+//     const tickets: ExpoPushTicket[] = [];
+
 //     for (const chunk of chunks) {
 //       try {
-//         await this.expo.sendPushNotificationsAsync(chunk);
+//         const ticketChunk = await this.expo.sendPushNotificationsAsync(chunk);
+//         tickets.push(...ticketChunk);
 //       } catch (error) {
-//         this.logger.error('Error sending push chunk', error);
+//         this.logger.error('❌ Error sending push notification chunk', error);
 //       }
 //     }
+    
+//     return tickets;
 //   }
 
-//   /**
-//    * Create database notification record
-//    */
 //   async createNotification(
-//     companyId: string, 
-//     type: NotificationType, 
-//     title: string, 
-//     body: string, 
-//     data?: any, 
-//     leadId?: string
-//   ): Promise<Notification> {
-//     const notification = this.notificationRepository.create({ 
-//       companyId, 
-//       type, 
-//       title, 
-//       body, 
-//       data: data || {}, 
-//       leadId 
+//     companyId: string,
+//     type: NotificationType,
+//     title: string,
+//     body: string,
+//     data: any = {},
+//   ) {
+//     const notification = this.notificationRepository.create({
+//       companyId,
+//       type,
+//       title,
+//       body,
+//       data,
+//       isRead: false,
 //     });
-//     return await this.notificationRepository.save(notification);
-//   }
+//     await this.notificationRepository.save(notification);
 
-//   // --- BUSINESS LOGIC METHODS ---
-
-//   async sendNewLeadNotification(companyId: string, leadId: string, leadName: string): Promise<void> {
-//     const title = 'New Lead Assigned! 🚀';
-//     const body = `A new lead "${leadName}" has been assigned to you.`;
+//     const userTokens = await this.expoPushTokenRepository.find({
+//       where: { companyId, isActive: true },
+//     });
     
-//     await this.createNotification(companyId, NotificationType.NEW_LEAD, title, body, { leadId }, leadId);
-
-//     const tokens = await this.expoPushTokenRepository.find({ where: { companyId, isActive: true } });
-//     const pushTokens = tokens.map(t => t.token);
-//     await this.sendPushNotifications(pushTokens, title, body, { leadId, type: 'NEW_LEAD' });
-//   }
-
-//   async sendLeadConsumedNotification(companyId: string, leadId: string, leadName: string): Promise<void> {
-//     const title = 'Lead Status Updated';
-//     const body = `The lead "${leadName}" has been successfully processed.`;
-
-//     // Note: If NotificationType.LEAD_UPDATE fails, check your entity for the correct enum name
-//     await this.createNotification(companyId, NotificationType.NEW_LEAD, title, body, { leadId }, leadId);
-
-//     const tokens = await this.expoPushTokenRepository.find({ where: { companyId, isActive: true } });
-//     const pushTokens = tokens.map(t => t.token);
-//     await this.sendPushNotifications(pushTokens, title, body, { leadId, type: 'LEAD_UPDATE' });
-//   }
-
-//   async sendBroadcastNotification(title: string, body: string, data?: any): Promise<void> {
-//     const companies = await this.companyRepository.find({ where: { isDeleted: false } });
+//     const pushTokens = userTokens.map((t) => t.token);
     
-//     for (const company of companies) {
-//       await this.createNotification(company.id, NotificationType.ADMIN_BROADCAST, title, body, data);
+//     if (pushTokens.length > 0) {
+//       await this.sendPushNotifications(pushTokens, title, body, { 
+//         ...data, 
+//         notificationId: notification.id,
+//         type 
+//       });
 //     }
 
-//     const tokens = await this.expoPushTokenRepository.find({ where: { isActive: true } });
-//     const pushTokens = tokens.map(t => t.token);
-//     await this.sendPushNotifications(pushTokens, title, body, { ...data, type: 'BROADCAST' });
+//     return notification;
 //   }
 
-//   // --- DATA MANAGEMENT METHODS ---
+//   // ✅ FIX: Added optional arguments to match leads.service calls
+//   async sendNewLeadNotification(lead: any, messageOrTitle: string, companyId: string) {
+//     return this.createNotification(
+//       companyId,
+//       NotificationType.NEW_LEAD,
+//       'New Lead Alert 🚀',
+//       messageOrTitle || `New requirement posted: ${lead.title}`,
+//       { leadId: lead.id }
+//     );
+//   }
+
+//   // ✅ FIX: Added 3rd argument 'consumerName' to match leads.service calls
+//   async sendLeadConsumedNotification(companyId: string, leadTitle: string, consumerName?: string) {
+//     const bodyText = consumerName 
+//       ? `${consumerName} has viewed your lead: ${leadTitle}`
+//       : `Your lead "${leadTitle}" was viewed by a potential partner`;
+
+//     return this.createNotification(
+//       companyId,
+//       NotificationType.LEAD_CONSUMED,
+//       'Lead Unlocked 🔓',
+//       bodyText,
+//       {}
+//     );
+//   }
+
+//   async sendBroadcastNotification(title: string, body: string, data: any = {}) {
+//     const allTokens = await this.expoPushTokenRepository.find({ 
+//       where: { isActive: true } 
+//     });
+//     const pushTokens = allTokens.map((t) => t.token);
+
+//     if (pushTokens.length > 0) {
+//       await this.sendPushNotifications(pushTokens, title, body, {
+//         ...data,
+//         type: 'BROADCAST'
+//       });
+//     }
+//   }
+
+//   // ==========================================
+//   // 3. USER ACTIONS
+//   // ==========================================
 
 //   async getUserNotifications(companyId: string) {
-//     return this.notificationRepository.find({ 
-//       where: { companyId }, 
-//       order: { createdAt: 'DESC' } 
+//     return this.notificationRepository.find({
+//       where: { companyId },
+//       order: { createdAt: 'DESC' },
 //     });
 //   }
 
 //   async getUnreadCount(companyId: string) {
-//     return this.notificationRepository.count({ where: { companyId, isRead: false } });
+//     return this.notificationRepository.count({
+//       where: { companyId, isRead: false },
+//     });
 //   }
 
 //   async markAsRead(notificationIds: string[]) {
 //     if (notificationIds.length > 0) {
-//       await this.notificationRepository.update({ id: In(notificationIds) }, { isRead: true });
+//       await this.notificationRepository.update(
+//         { id: In(notificationIds) },
+//         { isRead: true },
+//       );
 //     }
 //   }
 
-//   async markAllAsRead(companyId: string): Promise<void> {
-//     await this.notificationRepository.update({ companyId, isRead: false }, { isRead: true });
+//   async markAllAsRead(companyId: string) {
+//     await this.notificationRepository.update(
+//       { companyId, isRead: false },
+//       { isRead: true },
+//     );
 //   }
 
-//   async deleteNotification(id: string, companyId: string): Promise<void> {
-//     const result = await this.notificationRepository.delete({ id, companyId });
-//     if (result.affected === 0) {
-//       throw new NotFoundException(`Notification not found`);
-//     }
+//   async deleteNotification(id: string, companyId: string) {
+//     await this.notificationRepository.delete({ id, companyId });
 //   }
 
-//   async deleteAllNotifications(companyId: string): Promise<void> {
+//   async deleteAllNotifications(companyId: string) {
 //     await this.notificationRepository.delete({ companyId });
 //   }
 // }
 
- // src/modules/notifications/notifications.service.ts
- import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Not } from 'typeorm'; // 👈 Added 'Not' import
 import { Notification, NotificationType } from './entities/notification.entity';
 import { ExpoPushToken } from './entities/expo-push-token.entity';
 import { Company } from '../company/entities/company.entity';
@@ -326,18 +361,57 @@ export class NotificationsService {
     return notification;
   }
 
-  // ✅ FIX: Added optional arguments to match leads.service calls
-  async sendNewLeadNotification(lead: any, messageOrTitle: string, companyId: string) {
-    return this.createNotification(
-      companyId,
-      NotificationType.NEW_LEAD,
-      'New Lead Alert 🚀',
-      messageOrTitle || `New requirement posted: ${lead.title}`,
-      { leadId: lead.id }
-    );
+  // ✅ FIX: Changed logic to Broadcast to EVERYONE EXCEPT CREATOR
+  async sendNewLeadNotification(leadId: string, leadTitle: string, creatorCompanyId: string) {
+    const title = 'New Lead Alert 🚀';
+    const body = `New requirement posted: ${leadTitle}`;
+    const data = { leadId, type: NotificationType.NEW_LEAD };
+
+    this.logger.log(`📢 Broadcasting new lead to all except ${creatorCompanyId}`);
+
+    // 1. Send Push to ALL users EXCEPT creator
+    // We filter tokens where companyId is NOT the creator's ID
+    const tokens = await this.expoPushTokenRepository.find({ 
+      where: { 
+        isActive: true,
+        companyId: Not(creatorCompanyId) // 👈 This ensures creator doesn't get push
+      } 
+    });
+    
+    const pushTokens = tokens.map(t => t.token);
+
+    if (pushTokens.length > 0) {
+      await this.sendPushNotifications(pushTokens, title, body, data);
+    }
+
+    // 2. Create In-App Notifications for ALL active companies EXCEPT creator
+    const companies = await this.companyRepository.find({
+      where: { 
+        id: Not(creatorCompanyId), // 👈 This ensures creator doesn't get in-app alert
+        isDeleted: false
+      },
+      select: ['id']
+    });
+
+    if (companies.length > 0) {
+      const notifications = companies.map(company => 
+        this.notificationRepository.create({
+          companyId: company.id,
+          type: NotificationType.NEW_LEAD,
+          title,
+          body,
+          data,
+          isRead: false,
+          leadId
+        })
+      );
+      
+      // Batch save for performance
+      await this.notificationRepository.save(notifications);
+    }
   }
 
-  // ✅ FIX: Added 3rd argument 'consumerName' to match leads.service calls
+  // This one stays the same (Targeted notification to lead owner)
   async sendLeadConsumedNotification(companyId: string, leadTitle: string, consumerName?: string) {
     const bodyText = consumerName 
       ? `${consumerName} has viewed your lead: ${leadTitle}`
@@ -353,6 +427,23 @@ export class NotificationsService {
   }
 
   async sendBroadcastNotification(title: string, body: string, data: any = {}) {
+    // 1. Create In-App for everyone
+    const allCompanies = await this.companyRepository.find({ select: ['id'] });
+    if (allCompanies.length > 0) {
+        const notifications = allCompanies.map(company => 
+            this.notificationRepository.create({
+                companyId: company.id,
+                type: NotificationType.ADMIN_BROADCAST,
+                title,
+                body,
+                data,
+                isRead: false,
+            })
+        );
+        await this.notificationRepository.save(notifications);
+    }
+
+    // 2. Send Push to everyone
     const allTokens = await this.expoPushTokenRepository.find({ 
       where: { isActive: true } 
     });
