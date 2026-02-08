@@ -73,8 +73,5 @@ exports.typeOrmConfig = {
     ],
     synchronize: true,
     logging: false,
-    ssl: {
-        rejectUnauthorized: false
-    },
 };
 //# sourceMappingURL=typeorm.config.js.map
