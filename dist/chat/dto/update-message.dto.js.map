@@ -1,0 +1,1 @@
+{"version":3,"file":"update-message.dto.js","sourceRoot":"","sources":["../../../src/chat/dto/update-message.dto.ts"],"names":[],"mappings":";;;;;;;;;;;;AACA,qDAAuD;AACvD,6CAA8C;AAE9C,MAAa,gBAAgB;IAO3B,OAAO,CAAS;CACjB;AARD,4CAQC;AADC;IANC,IAAA,qBAAW,EAAC;QACX,WAAW,EAAE,8BAA8B;QAC3C,OAAO,EAAE,oEAAoE;KAC9E,CAAC;IACD,IAAA,0BAAQ,GAAE;IACV,IAAA,4BAAU,GAAE;;iDACG"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"follow.dto.js","sourceRoot":"","sources":["../../../src/followers/dto/follow.dto.ts"],"names":[],"mappings":";;;;;;;;;;;;AACA,qDAA+D;AAC/D,6CAA8C;AAE9C,MAAa,SAAS;IAQpB,SAAS,CAAS;CACnB;AATD,8BASC;AADC;IAPC,IAAA,qBAAW,EAAC;QACX,WAAW,EAAE,+BAA+B;QAC5C,OAAO,EAAE,sCAAsC;KAChD,CAAC;IACD,IAAA,0BAAQ,GAAE;IACV,IAAA,4BAAU,GAAE;IACZ,IAAA,wBAAM,GAAE;;4CACS"}

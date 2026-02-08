@@ -1,0 +1,35 @@
+import { Lead } from '../../leads/entities/lead.entity';
+import { Product } from '../../products/entities/product.entity';
+import { Follower } from '../../followers/entities/follower.entity';
+import { Post } from '../../posts/entities/post.entity';
+export declare class Company {
+    id: string;
+    phoneNumber: string;
+    gstNumber: string;
+    companyName: string;
+    referralCode: string;
+    leadQuota: number;
+    consumedLeads: number;
+    postingQuota: number;
+    postedLeads: number;
+    followersCount: number;
+    isDeleted: boolean;
+    createdAt: Date;
+    lastLoginDate: Date;
+    updatedAt: Date;
+    logo?: string;
+    address?: string;
+    description?: string;
+    category?: string;
+    userName?: string;
+    userPhoto?: string;
+    coverImage?: string;
+    registeredAddress?: string;
+    about?: string;
+    operationalAddress?: string;
+    leads: Lead[];
+    products: Product[];
+    following: Follower[];
+    followers: Follower[];
+    posts: Post[];
+}
