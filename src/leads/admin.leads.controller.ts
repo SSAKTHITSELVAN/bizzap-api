@@ -358,4 +358,102 @@ export class AdminLeadsController {
       },
     };
   }
+
+  @Get('flow/overview')
+  @ApiOperation({
+    summary: '[ADMIN] Full application flow overview',
+    description:
+      'Returns every company alongside their posted leads and consumed leads in a single aggregated response. ' +
+      'Useful for a bird\'s-eye view of the entire platform activity.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Full flow overview retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        totalCompanies: { type: 'number', example: 42 },
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              company: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  companyName: { type: 'string' },
+                  phoneNumber: { type: 'string' },
+                  category: { type: 'string' },
+                  leadQuota: { type: 'number' },
+                  consumedLeadsCount: { type: 'number' },
+                  postingQuota: { type: 'number' },
+                  postedLeadsCount: { type: 'number' },
+                  createdAt: { type: 'string', format: 'date-time' },
+                },
+              },
+              postedLeads: {
+                type: 'array',
+                description: 'All leads this company has posted',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    title: { type: 'string' },
+                    isActive: { type: 'boolean' },
+                    consumedCount: { type: 'number' },
+                    viewCount: { type: 'number' },
+                    createdAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+              consumedLeads: {
+                type: 'array',
+                description: 'All leads this company has consumed from others',
+                items: {
+                  type: 'object',
+                  properties: {
+                    consumedLeadRecordId: { type: 'string' },
+                    leadId: { type: 'string' },
+                    leadTitle: { type: 'string' },
+                    dealStatus: { type: 'string', enum: ['PENDING', 'COMPLETED', 'FAILED', 'NO_RESPONSE'] },
+                    dealValue: { type: 'number', nullable: true },
+                    consumedAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+              stats: {
+                type: 'object',
+                properties: {
+                  totalPostedLeads: { type: 'number' },
+                  activePostedLeads: { type: 'number' },
+                  inactivePostedLeads: { type: 'number' },
+                  totalConsumedLeads: { type: 'number' },
+                  consumedDealBreakdown: {
+                    type: 'object',
+                    properties: {
+                      PENDING: { type: 'number' },
+                      COMPLETED: { type: 'number' },
+                      FAILED: { type: 'number' },
+                      NO_RESPONSE: { type: 'number' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getFullApplicationFlowOverview() {
+    const data = await this.leadsService.getFullApplicationFlowOverview();
+    return {
+      message: 'Full application flow overview retrieved successfully',
+      totalCompanies: data.length,
+      data,
+    };
+  }
 }

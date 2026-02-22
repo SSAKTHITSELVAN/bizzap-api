@@ -926,4 +926,116 @@ export class LeadsService {
       count: leadsWithUrls.length,
     };
   }
+  // ============================================================
+// ADMIN: FULL APPLICATION FLOW OVERVIEW
+// ============================================================
+
+/**
+ * Returns every company with their posted leads and consumed leads
+ * in a single aggregated response for admin overview.
+ */
+async getFullApplicationFlowOverview(): Promise<any[]> {
+  // 1. Fetch all non-deleted companies
+  const companies = await this.leadRepository.manager
+    .getRepository('Company')
+    .find({ where: { isDeleted: false }, order: { createdAt: 'DESC' } }) as any[];
+
+  // 2. Fetch all non-deleted leads (with company relation for ownership)
+  const allLeads = await this.leadRepository.find({
+    where: { isDeleted: false },
+    order: { createdAt: 'DESC' },
+  });
+
+  // 3. Fetch all consumed lead records (with relations)
+  const allConsumedLeads = await this.consumedLeadRepository.find({
+    relations: ['lead'],
+    order: { consumedAt: 'DESC' },
+  });
+
+  // 4. Attach signed URLs to leads
+  const leadsWithUrls = await this.attachSignedUrls(allLeads);
+
+  // 5. Build lookup maps for O(1) access
+  const leadsByCompanyId = new Map<string, Lead[]>();
+  for (const lead of leadsWithUrls) {
+    if (!leadsByCompanyId.has(lead.companyId)) {
+      leadsByCompanyId.set(lead.companyId, []);
+    }
+    leadsByCompanyId.get(lead.companyId)!.push(lead);
+  }
+
+  const consumedByCompanyId = new Map<string, ConsumedLead[]>();
+  for (const cl of allConsumedLeads) {
+    if (!consumedByCompanyId.has(cl.companyId)) {
+      consumedByCompanyId.set(cl.companyId, []);
+    }
+    consumedByCompanyId.get(cl.companyId)!.push(cl);
+  }
+
+  // 6. Assemble the result
+  return companies.map((company) => {
+    const postedLeads = leadsByCompanyId.get(company.id) || [];
+    const consumedLeads = consumedByCompanyId.get(company.id) || [];
+
+    const consumedLeadsSummary = consumedLeads.map((cl) => ({
+      consumedLeadRecordId: cl.id,
+      leadId: cl.leadId,
+      leadTitle: cl.lead?.title ?? null,
+      dealStatus: cl.dealStatus,
+      dealValue: cl.dealValue ?? null,
+      dealNotes: cl.dealNotes ?? null,
+      consumedAt: cl.consumedAt,
+      statusUpdatedAt: cl.statusUpdatedAt ?? null,
+    }));
+
+    return {
+      company: {
+        id: company.id,
+        companyName: company.companyName,
+        phoneNumber: company.phoneNumber,
+        gstNumber: company.gstNumber,
+        referralCode: company.referralCode,
+        category: company.category ?? null,
+        address: company.address ?? null,
+        leadQuota: company.leadQuota,
+        consumedLeadsCount: company.consumedLeads,
+        postingQuota: company.postingQuota,
+        postedLeadsCount: company.postedLeads,
+        createdAt: company.createdAt,
+        lastLoginDate: company.lastLoginDate ?? null,
+      },
+      postedLeads: postedLeads.map((lead) => ({
+        id: lead.id,
+        title: lead.title,
+        description: lead.description,
+        budget: lead.budget,
+        quantity: lead.quantity,
+        location: lead.location,
+        isActive: lead.isActive,
+        reasonForDeactivation: lead.reasonForDeactivation ?? null,
+        consumedCount: lead.consumedCount,
+        viewCount: lead.viewCount,
+        imageUrl: lead.imageUrl ?? null,
+        createdAt: lead.createdAt,
+        updatedAt: lead.updatedAt,
+      })),
+      consumedLeads: consumedLeadsSummary,
+      stats: {
+        totalPostedLeads: postedLeads.length,
+        activePostedLeads: postedLeads.filter((l) => l.isActive).length,
+        inactivePostedLeads: postedLeads.filter((l) => !l.isActive).length,
+        totalConsumedLeads: consumedLeadsSummary.length,
+        consumedDealBreakdown: {
+          PENDING: consumedLeadsSummary.filter((c) => c.dealStatus === 'PENDING').length,
+          COMPLETED: consumedLeadsSummary.filter((c) => c.dealStatus === 'COMPLETED').length,
+          FAILED: consumedLeadsSummary.filter((c) => c.dealStatus === 'FAILED').length,
+          NO_RESPONSE: consumedLeadsSummary.filter((c) => c.dealStatus === 'NO_RESPONSE').length,
+        },
+      },
+    };
+  });
+}
+
+
+
 }
