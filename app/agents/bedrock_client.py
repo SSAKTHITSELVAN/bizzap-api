@@ -1,14 +1,36 @@
 """
-AWS Bedrock client — calls the local Node.js proxy (server.js on port 3000)
-which handles the Bedrock auth correctly.
-Node proxy endpoint: POST http://localhost:3000/api/chat
+AWS Bedrock client — direct call to Bedrock runtime.
+Same request structure as the working Node.js proxy.
 """
 import httpx
 import json
+import os
+from pathlib import Path
 from typing import List, Optional
 
-# Node proxy URL — your server.js running on port 3000
-NODE_PROXY_URL = "http://localhost:3000/api/chat"
+BEDROCK_REGION = "us-west-2"
+MODEL_ID       = "qwen.qwen3-vl-235b-a22b"
+BEDROCK_URL    = f"https://bedrock-runtime.{BEDROCK_REGION}.amazonaws.com/model/{MODEL_ID}/converse"
+
+# Load .env from project root (bisdom/.env)
+# parents[2] = project root regardless of OS
+_env_path = Path(__file__).resolve().parents[2] / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            _k = _k.strip()
+            _v = _v.strip().strip('"').strip("'")  # remove quotes if present
+            if _k not in os.environ:
+                os.environ[_k] = _v
+
+BEARER_TOKEN = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "").strip()
+
+# Fail fast at startup if token is missing
+if not BEARER_TOKEN:
+    import warnings
+    warnings.warn("AWS_BEARER_TOKEN_BEDROCK is not set — Bedrock calls will fail")
 
 
 async def call_qwen3(
@@ -18,50 +40,65 @@ async def call_qwen3(
     temperature: float = 0.7,
     url_context: Optional[str] = None,
 ) -> str:
-    """
-    Call Qwen3 via the local Node.js proxy server (server.js).
-    The proxy handles Bedrock Bearer auth correctly.
-    POST { system, messages } → { text }
-    """
-    # Normalize messages to { role, content: string }
-    # Node does: content: [{ text: String(m.content) }]
-    # so we send content as plain string and let Node wrap it
+    if not BEARER_TOKEN:
+        raise Exception("AWS_BEARER_TOKEN_BEDROCK not set in environment or .env file")
+
+    # Normalize messages — content must be [{"text": str}]
     normalized = []
     for msg in messages:
         role    = msg.get("role", "user")
         content = msg.get("content", "")
         if isinstance(content, list):
-            # flatten list content to string
             parts = [b.get("text", "") if isinstance(b, dict) else str(b) for b in content]
             content = " ".join(parts)
-        normalized.append({"role": role, "content": str(content)})
+        normalized.append({
+            "role":    role,
+            "content": [{"text": str(content)}],
+        })
 
-    payload = {
-        "system":   system_prompt or "",
+    body: dict = {
         "messages": normalized,
+        "inferenceConfig": {
+            "maxTokens":   max_tokens,
+            "temperature": temperature,
+            "topP":        0.9,
+        },
+    }
+    if system_prompt:
+        body["system"] = [{"text": system_prompt}]
+
+    body_bytes = json.dumps(body).encode("utf-8")
+
+    headers = {
+        "Content-Type":  "application/json",
+        "Authorization": f"Bearer {BEARER_TOKEN}",
     }
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                NODE_PROXY_URL,
-                json=payload,
+                BEDROCK_URL,
+                headers=headers,
+                content=body_bytes,
             )
             response.raise_for_status()
             data = response.json()
-            return data.get("text", "")
+            return (
+                data.get("output", {})
+                    .get("message", {})
+                    .get("content", [{}])[0]
+                    .get("text", "")
+            )
 
     except httpx.HTTPStatusError as e:
-        raise Exception(f"Node proxy error {e.response.status_code}: {e.response.text}")
-    except httpx.ConnectError:
-        raise Exception("Node proxy not running. Start it with: node server.js")
+        raise Exception(f"Bedrock API error {e.response.status_code}: {e.response.text}")
     except Exception as e:
         raise Exception(f"Bedrock call failed: {str(e)}")
 
 
 async def call_qwen3_with_url(url: str, instruction: str) -> str:
     messages = [
-        {"role": "user", "content": f"Please visit and analyze this URL: {url}\n\n{instruction}"},
+        {"role": "user", "content": [{"text": f"Please visit and analyze this URL: {url}\n\n{instruction}"}]},
     ]
     return await call_qwen3(
         messages,
