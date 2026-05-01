@@ -1,6 +1,6 @@
 """
-Matching Service — matches confirmed buyer requirements against all active supplier profiles.
-Creates Lead records for each match above the threshold.
+Matching Service — matches confirmed buyer requirements against supplier profiles.
+Creates Lead records for each match, then initiates agent conversations.
 """
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -8,10 +8,10 @@ from typing import List
 from app.models.profile import AgenticProfile
 from app.models.requirement import Requirement
 from app.models.lead import Lead
-from app.models.user import User
-from app.agents.supplier_agent import evaluate_match_signal, get_default_agent_config
 import asyncio
+import logging
 
+logger = logging.getLogger(__name__)
 
 MINIMUM_FIT_SCORE = 40.0
 
@@ -22,64 +22,52 @@ async def match_requirement_to_suppliers(
 ) -> List[Lead]:
     """
     Find all supplier profiles that match this requirement.
-    Creates Lead records for matches above threshold.
+    Creates Lead records for all matches above threshold.
     """
-    # Fetch all active supplier profiles (excluding the buyer themselves)
+    # Fetch ALL profiles except the buyer — no filter on is_supplier or status
     result = await db.execute(
         select(AgenticProfile).where(
-            AgenticProfile.is_supplier == True,
             AgenticProfile.user_id != requirement.buyer_id,
-            AgenticProfile.profile_build_status == "complete",
         )
     )
     supplier_profiles = result.scalars().all()
 
+    logger.info(f"[MATCH] Requirement #{requirement.id} ({requirement.product}): "
+                f"found {len(supplier_profiles)} potential suppliers")
+
     if not supplier_profiles:
+        logger.warning(f"[MATCH] No other profiles in DB — only 1 user registered")
+        requirement.enrichment_status = "matched"
+        requirement.matched_supplier_count = 0
+        await db.flush()
         return []
 
-    # Convert requirement to dict for AI evaluation
     req_dict = _requirement_to_dict(requirement)
-
-    # Evaluate each supplier concurrently (batch of 10 to avoid rate limits)
     leads_created = []
-    batch_size = 10
 
-    for i in range(0, len(supplier_profiles), batch_size):
-        batch = supplier_profiles[i:i + batch_size]
-        tasks = [
-            _evaluate_and_create_lead(supplier, req_dict, requirement, db)
-            for supplier in batch
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, Lead):
-                leads_created.append(result)
+    for profile in supplier_profiles:
+        lead = await _create_lead(profile, req_dict, requirement, db)
+        if lead:
+            leads_created.append(lead)
+            logger.info(f"[MATCH] Created lead #{lead.id} → supplier user #{profile.user_id} "
+                        f"({profile.trade_name}) fit={lead.fit_score:.0f}%")
 
-    # Update requirement with match count
     requirement.matched_supplier_count = len(leads_created)
-    if leads_created:
-        requirement.enrichment_status = "matched"
+    requirement.enrichment_status = "matched"
     await db.flush()
 
+    logger.info(f"[MATCH] Requirement #{requirement.id}: {len(leads_created)} leads created")
     return leads_created
 
 
-async def _evaluate_and_create_lead(
+async def _create_lead(
     supplier_profile: AgenticProfile,
     requirement_dict: dict,
     requirement: Requirement,
     db: AsyncSession,
 ) -> Lead | None:
-    """Evaluate a single supplier and create a Lead if fit score is sufficient."""
     try:
-        profile_dict = _profile_to_dict(supplier_profile)
-        agent_config = supplier_profile.agent_config or get_default_agent_config()
-
-        evaluation = await evaluate_match_signal(requirement_dict, profile_dict, agent_config)
-        fit_score = evaluation.get("fit_score", 0)
-
-        if fit_score < MINIMUM_FIT_SCORE:
-            return None
+        fit_score = _calculate_basic_fit(requirement_dict, supplier_profile)
 
         # Check if lead already exists
         existing = await db.execute(
@@ -89,23 +77,57 @@ async def _evaluate_and_create_lead(
             )
         )
         if existing.scalar_one_or_none():
+            logger.info(f"[MATCH] Lead already exists for supplier #{supplier_profile.user_id}")
             return None
 
-        # Create lead
+        match_reasons = [f"Fit score: {fit_score:.0f}%"]
+        if supplier_profile.product_categories:
+            match_reasons.append(f"Products: {', '.join(supplier_profile.product_categories[:2])}")
+        if supplier_profile.state:
+            match_reasons.append(f"Location: {supplier_profile.state}")
+
         lead = Lead(
             requirement_id=requirement.id,
             buyer_id=requirement.buyer_id,
             supplier_id=supplier_profile.user_id,
             fit_score=fit_score,
-            match_reasons=evaluation.get("match_reasons", []),
-            status="new" if not evaluation.get("needs_human_approval") else "pending_supplier_approval",
+            match_reasons=match_reasons,
+            status="new",
         )
         db.add(lead)
         await db.flush()
         return lead
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"[MATCH] Error creating lead for supplier #{supplier_profile.user_id}: {e}")
         return None
+
+
+def _calculate_basic_fit(requirement: dict, profile: AgenticProfile) -> float:
+    """Fast rule-based fit score — no AI call needed."""
+    score = 60.0  # base — any registered user is a potential supplier
+
+    # Product category match
+    cats = profile.product_categories or []
+    product = (requirement.get("product") or "").lower()
+    if cats:
+        for cat in cats:
+            if any(word in cat.lower() for word in product.split() if len(word) > 3):
+                score += 20
+                break
+    
+    # Location match
+    location = (requirement.get("delivery_location") or "").lower()
+    state = (profile.state or "").lower()
+    city  = (profile.city or "").lower()
+    if location and state and (state in location or city in location):
+        score += 15
+
+    # Has pricing info
+    if profile.pricing_bands:
+        score += 5
+
+    return min(score, 100.0)
 
 
 def _requirement_to_dict(req: Requirement) -> dict:
@@ -129,14 +151,8 @@ def _profile_to_dict(profile: AgenticProfile) -> dict:
         "product_categories": profile.product_categories or [],
         "capabilities": profile.capabilities or {},
         "pricing_bands": profile.pricing_bands or {},
-        "min_order_quantities": profile.min_order_quantities or {},
-        "max_order_quantities": profile.max_order_quantities or {},
         "serviceable_locations": profile.serviceable_locations or [],
-        "standard_lead_times": profile.standard_lead_times or {},
-        "payment_terms": profile.payment_terms or [],
-        "certifications": profile.certifications or [],
         "state": profile.state,
         "city": profile.city,
         "reliability_score": profile.reliability_score,
-        "is_supplier": profile.is_supplier,
     }
