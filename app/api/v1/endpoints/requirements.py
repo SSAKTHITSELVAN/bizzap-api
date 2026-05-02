@@ -335,13 +335,16 @@ async def _initiate_seller_conversation(lead_id: int):
 
             lead.status = "negotiating"
             lead.negotiation_round = 1
-            # Unlimited rounds — set high
-            lead.max_negotiation_rounds = 999
+            lead.max_negotiation_rounds = 999  # Unlimited
 
             await db.commit()
-            logger.info(f"[CONV] Lead #{lead_id}: seller opened, buyer responded ✓")
+            logger.info(f"[CONV] Lead #{lead_id}: seller opened, buyer responded ✓ — starting autonomous loop")
+
+            # Kick off autonomous negotiation loop
+            import asyncio
+            from app.api.v1.endpoints.conversations import _run_autonomous_negotiation_round
+            asyncio.create_task(_run_autonomous_negotiation_round(lead_id))
 
         except Exception as e:
             logger.error(f"[CONV] Lead #{lead_id}: error — {e}")
             import traceback; traceback.print_exc()
-            
