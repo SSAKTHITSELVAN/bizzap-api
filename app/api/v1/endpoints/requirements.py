@@ -209,22 +209,28 @@ async def _run_matching(requirement_id: int):
 
 
 async def _initiate_agent_conversation(lead_id: int):
-    """Create conversation and have buyer agent send the opening message."""
+    """
+    Full agent conversation initiation:
+    1. Buyer AI sends opening message
+    2. Supplier AI immediately responds
+    This creates the first real exchange visible to both parties.
+    """
     from app.db.base import AsyncSessionLocal
     from app.models.lead import Lead
     from app.models.conversation import Conversation, Message
     from app.agents.buyer_agent import generate_buyer_opener
+    from app.agents.supplier_agent import supplier_agent_respond, get_default_agent_config
+    from app.models.user_config import UserConfig
+    import logging
+    logger = logging.getLogger(__name__)
 
     async with AsyncSessionLocal() as db:
         try:
-            lead_result = await db.execute(
-                select(Lead).where(Lead.id == lead_id)
-            )
+            lead_result = await db.execute(select(Lead).where(Lead.id == lead_id))
             lead = lead_result.scalar_one_or_none()
             if not lead:
                 return
 
-            # Get buyer profile and requirement
             req_result = await db.execute(
                 select(Requirement).where(Requirement.id == lead.requirement_id)
             )
@@ -236,6 +242,7 @@ async def _initiate_agent_conversation(lead_id: int):
             supplier_profile = supplier_profile_result.scalar_one_or_none()
 
             if not requirement or not supplier_profile:
+                logger.warning(f"[CONV] Lead #{lead_id}: missing requirement or supplier profile")
                 return
 
             req_dict = {
@@ -249,13 +256,24 @@ async def _initiate_agent_conversation(lead_id: int):
             }
 
             supplier_dict = {
-                "trade_name": supplier_profile.trade_name,
+                "trade_name": supplier_profile.trade_name or "Supplier",
                 "product_categories": supplier_profile.product_categories or [],
                 "city": supplier_profile.city,
                 "state": supplier_profile.state,
             }
 
+            # Load supplier config (profile_md + seller_settings_md)
+            cfg_result = await db.execute(
+                select(UserConfig).where(UserConfig.user_id == lead.supplier_id)
+            )
+            supplier_cfg = cfg_result.scalar_one_or_none()
+            profile_md = supplier_cfg.profile_md if supplier_cfg else ""
+            seller_settings_md = supplier_cfg.seller_settings_md if supplier_cfg else ""
+
+            # Step 1: Buyer AI generates opening message
+            logger.info(f"[CONV] Lead #{lead_id}: generating buyer opener")
             opener_result = await generate_buyer_opener(req_dict, supplier_dict)
+            buyer_opener = opener_result["message"]
 
             # Create conversation
             conversation = Conversation(
@@ -263,23 +281,73 @@ async def _initiate_agent_conversation(lead_id: int):
                 buyer_id=lead.buyer_id,
                 supplier_id=lead.supplier_id,
                 mode="ai_negotiating",
-                ai_context=[{"role": "assistant", "content": opener_result["message"]}],
+                ai_context=[{"role": "user", "content": buyer_opener}],
             )
             db.add(conversation)
             await db.flush()
 
-            # Create first message
-            first_msg = Message(
+            # Save buyer opener message
+            buyer_msg = Message(
                 conversation_id=conversation.id,
                 role="ai_buyer",
                 message_type="text",
-                content=opener_result["message"],
+                content=buyer_opener,
             )
-            db.add(first_msg)
+            db.add(buyer_msg)
+            await db.flush()
 
-            # Update lead status
-            lead.status = "agent_initiated"
+            # Step 2: Supplier AI immediately responds to buyer opener
+            logger.info(f"[CONV] Lead #{lead_id}: supplier AI responding")
+            agent_config = supplier_profile.agent_config or get_default_agent_config()
+
+            supplier_response = await supplier_agent_respond(
+                conversation_history=[{"role": "user", "content": buyer_opener}],
+                buyer_message=buyer_opener,
+                supplier_profile={
+                    "trade_name": supplier_profile.trade_name or "Supplier",
+                    "product_categories": supplier_profile.product_categories or [],
+                    "pricing_bands": supplier_profile.pricing_bands or {},
+                    "state": supplier_profile.state,
+                    "city": supplier_profile.city,
+                },
+                agent_config=agent_config,
+                negotiation_round=1,
+                max_rounds=lead.max_negotiation_rounds,
+                profile_md=profile_md,
+                seller_settings_md=seller_settings_md,
+            )
+
+            supplier_reply = supplier_response.get("message", "")
+
+            # Save supplier response message
+            supplier_msg = Message(
+                conversation_id=conversation.id,
+                role="ai_supplier",
+                message_type="text",
+                content=supplier_reply,
+                structured_data={"offer": supplier_response.get("extracted_offer")},
+            )
+            db.add(supplier_msg)
+
+            # Update AI context with both messages
+            conversation.ai_context = [
+                {"role": "user",      "content": buyer_opener},
+                {"role": "assistant", "content": supplier_reply},
+            ]
+
+            # Update lead with any offer data
+            if supplier_response.get("extracted_offer"):
+                offer = supplier_response["extracted_offer"]
+                lead.current_offer_price = offer.get("price_per_unit")
+                lead.current_lead_time   = offer.get("lead_time_days")
+
+            lead.status = "negotiating"
+            lead.negotiation_round = 1
+
             await db.commit()
+            logger.info(f"[CONV] Lead #{lead_id}: conversation initiated — buyer opened, supplier responded")
 
         except Exception as e:
-            print(f"Error initiating conversation for lead {lead_id}: {e}")
+            logger.error(f"[CONV] Lead #{lead_id}: error — {e}")
+            import traceback
+            traceback.print_exc()

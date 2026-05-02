@@ -15,6 +15,8 @@ from app.schemas.conversation import (
 )
 from app.agents.buyer_agent import buyer_agent_respond
 from app.agents.supplier_agent import supplier_agent_respond, get_default_agent_config
+from app.models.user_config import UserConfig
+from app.api.v1.endpoints.config import get_or_create_config
 from datetime import datetime
 
 router = APIRouter(prefix="/conversations", tags=["Conversations"])
@@ -118,9 +120,15 @@ async def send_message(
 
     # Check if human chat is enabled
     if is_buyer and not lead.buyer_chat_enabled:
-        raise HTTPException(status_code=403, detail="Enable human chat to send messages")
+        raise HTTPException(
+            status_code=403,
+            detail="AI is negotiating on your behalf. Enable 'Live' mode to chat manually."
+        )
     if is_supplier and not lead.supplier_chat_enabled:
-        raise HTTPException(status_code=403, detail="Enable human chat to send messages")
+        raise HTTPException(
+            status_code=403,
+            detail="AI is negotiating on your behalf. Enable 'Live' mode to chat manually."
+        )
 
     # Determine role
     role = "human_buyer" if is_buyer else "human_supplier"
