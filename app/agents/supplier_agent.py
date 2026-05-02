@@ -1,98 +1,57 @@
-from app.agents.config_agent import build_agent_system_prompt
 """
-Supplier Agent — Autonomous negotiation agent representing the supplier.
-Evaluates incoming match signals, prepares opening offers, negotiates with
-buyer agents, and escalates to human supplier when needed.
+Supplier Agent — Human-like B2B sales agent representing the supplier.
+Reads full seller profile + settings to negotiate naturally.
+One question at a time. Builds context. Closes deals like a real salesperson.
 """
 import json
+import re
 from typing import Optional
 from app.agents.bedrock_client import call_qwen3
+from app.agents.config_agent import build_agent_system_prompt
 
 
-SUPPLIER_AGENT_SYSTEM = """You are Bisdom's AI Supplier Agent — an autonomous negotiation agent
-representing an Indian SME supplier in B2B negotiations.
+SUPPLIER_AGENT_SYSTEM = """You are an experienced B2B sales executive representing {trade_name}, based in {location}.
 
-Your mandate:
-- Represent the supplier's interest to close deals at good margins
-- Never go below the supplier's price floor
-- Be professional and responsive — good communication wins deals
-- Close deals efficiently — don't drag negotiations
+ABOUT YOUR COMPANY:
+{profile_md}
 
-Supplier Profile:
-{supplier_profile_json}
+YOUR SALES SETTINGS & PRICING:
+{seller_settings_md}
 
-Agent Configuration:
-{agent_config_json}
+YOUR PERSONALITY & STYLE:
+- You are warm, professional, and genuinely helpful — like a real salesperson who wants repeat business
+- You ask ONE focused question at a time — never bombard the buyer with multiple questions
+- You listen carefully and build on what the buyer tells you
+- You know your products inside out and can recommend the right option
+- You share useful knowledge (fabric types, GSM, printing methods) when it helps the buyer decide
+- You speak naturally — not like a robot. Use phrases like "That's a great choice", "I understand", "Let me be transparent with you"
+- You match the buyer's language and communication style
 
-Rules:
-- Opening offer: start at preferred price or slightly above
-- Conservative mode: minimal concession, hold price for longer
-- Balanced mode: 2-3 rounds, reasonable concessions
-- Aggressive mode: make concessions faster to win the deal
-- NEVER go below floor price
-- If buyer asks below floor, say: <NEEDS_SUPPLIER_INPUT reason="Price below floor — ₹X requested vs ₹Y floor">
-- If order value > escalation threshold, say: <NEEDS_SUPPLIER_INPUT reason="High value order needs your approval">
-- When making offer: <OFFER price_per_unit="X" quantity="Y" lead_time_days="Z" payment_terms="..." />
+NEGOTIATION RULES:
+- Start with your target price (not floor price) — leave room to negotiate
+- When buyer counters, either: hold firm with a good reason, offer a small discount, or offer value-add (faster delivery, better payment terms, free samples)
+- NEVER go below your floor price from settings
+- If price below floor: explain why you can't go lower and offer alternatives
+- Volume discounts: apply automatically based on your settings
+- Be honest about timelines — never overpromise
 
-Keep responses professional, concise, and business-like."""
+OFFER FORMAT (include when quoting price):
+<OFFER price_per_unit="X" quantity="Y" lead_time_days="Z" payment_terms="..." />
 
+ESCALATE TO HUMAN when:
+- Order value exceeds your escalation threshold
+- Buyer requests something outside your catalog
+- You cannot commit to their deadline
+Use: <NEEDS_SUPPLIER_INPUT reason="..." />
 
-async def evaluate_match_signal(
-    requirement: dict,
-    supplier_profile: dict,
-    agent_config: dict,
-) -> dict:
-    """
-    Evaluate if supplier should respond to this buyer requirement.
+CONVERSATION FLOW:
+1. Greet warmly, acknowledge their requirement
+2. Ask the most important missing detail (one question only)
+3. Once you have enough info, give a clear quote
+4. Handle objections naturally — negotiate like a human
+5. Close the deal or escalate when needed
 
-    Returns:
-    {
-        "should_initiate": bool,
-        "fit_score": float,
-        "decline_reason": str or None,
-        "needs_human_approval": bool,
-    }
-    """
-    prompt = f"""Evaluate if this supplier should respond to this buyer requirement.
-
-Supplier Profile:
-{json.dumps(supplier_profile, indent=2)}
-
-Agent Config (price floors, MOQ, etc.):
-{json.dumps(agent_config, indent=2)}
-
-Buyer Requirement:
-{json.dumps(requirement, indent=2)}
-
-Score the fit 0-100 and decide:
-- Above 65: initiate conversation
-- 40-65: borderline — flag for human approval
-- Below 40: decline silently
-
-Return JSON:
-{{
-  "fit_score": 82,
-  "should_initiate": true,
-  "needs_human_approval": false,
-  "decline_reason": null,
-  "match_reasons": ["Product match: Cotton T-Shirts", "Price range compatible", "Location serviceable"]
-}}"""
-
-    messages = [{"role": "user", "content": [{"text": prompt}]}]
-    system = "You are a B2B commerce matching engine. Return only valid JSON."
-
-    try:
-        response = await call_qwen3(messages, system_prompt=system, max_tokens=512)
-        cleaned = response.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        return json.loads(cleaned)
-    except Exception:
-        return {
-            "fit_score": 0,
-            "should_initiate": False,
-            "needs_human_approval": False,
-            "decline_reason": "Evaluation failed",
-            "match_reasons": [],
-        }
+Remember: You represent {trade_name}. Be proud of your products. Build trust. Win the deal."""
 
 
 async def generate_supplier_opener(
@@ -102,24 +61,50 @@ async def generate_supplier_opener(
     profile_md: str = "",
     seller_settings_md: str = "",
 ) -> dict:
-    """Generate the supplier's opening offer message to the buyer's agent."""
-    base_system = SUPPLIER_AGENT_SYSTEM.format(
-        supplier_profile_json=json.dumps(supplier_profile, indent=2),
-        agent_config_json=json.dumps(agent_config, indent=2),
+    """Generate the supplier's opening message — warm, natural, human-like."""
+
+    trade_name = supplier_profile.get("trade_name", "our company")
+    location = f"{supplier_profile.get('city', '')}, {supplier_profile.get('state', 'India')}".strip(", ")
+
+    system = SUPPLIER_AGENT_SYSTEM.format(
+        trade_name=trade_name,
+        location=location,
+        profile_md=profile_md or f"Supplier: {trade_name}, Location: {location}",
+        seller_settings_md=seller_settings_md or "Standard negotiation — professional and balanced.",
     )
-    system = build_agent_system_prompt(base_system, profile_md, seller_settings_md)
 
-    prompt = f"""A buyer has posted this requirement and you've been matched:
-{json.dumps(requirement, indent=2)}
+    product = requirement.get("product", "your product")
+    quantity = requirement.get("quantity", "")
+    qty_unit = requirement.get("quantity_unit", "units")
+    budget = requirement.get("budget_max", "")
+    location_delivery = requirement.get("delivery_location", "")
 
-Generate a professional opening response with your best offer.
-Include product availability confirmation, your price, lead time, and payment terms.
-End with the <OFFER .../> tag."""
+    prompt = f"""A buyer has just posted this requirement and you've been matched:
+
+Product: {product}
+Quantity: {quantity} {qty_unit}
+Budget: ₹{budget}/unit (max)
+Delivery Location: {location_delivery}
+Additional details: {json.dumps(requirement.get("specifications") or {}, indent=2)}
+
+Write your opening message to the buyer. 
+- Greet them warmly and introduce yourself/your company briefly
+- Confirm you can fulfill their requirement
+- Ask the ONE most important question you need to give them a proper quote
+- Be natural and conversational — like a real salesperson would open
+- Keep it concise (3-5 sentences max)
+- Include <OFFER .../> only if you already have enough info to quote confidently"""
 
     messages = [{"role": "user", "content": [{"text": prompt}]}]
-    response = await call_qwen3(messages, system_prompt=system, max_tokens=400, temperature=0.6)
+    response = await call_qwen3(messages, system_prompt=system, max_tokens=350, temperature=0.75)
 
-    return {"message": response, "needs_supplier_input": False}
+    extracted_offer = _extract_offer(response)
+
+    return {
+        "message": response,
+        "extracted_offer": extracted_offer,
+        "needs_supplier_input": False,
+    }
 
 
 async def supplier_agent_respond(
@@ -128,39 +113,48 @@ async def supplier_agent_respond(
     supplier_profile: dict,
     agent_config: dict,
     negotiation_round: int,
-    max_rounds: int = 5,
+    max_rounds: int = 999,
     profile_md: str = "",
     seller_settings_md: str = "",
 ) -> dict:
     """
-    Generate supplier agent's response to buyer's message/counter-offer.
-
-    Returns:
-    {
-        "message": str,
-        "needs_supplier_input": bool,
-        "supplier_input_reason": str,
-        "extracted_offer": dict or None,
-        "is_deal_closed": bool,
-    }
+    Generate supplier's natural, human-like response to buyer's message.
+    Reads full company profile and settings. One question at a time.
     """
-    base_system = SUPPLIER_AGENT_SYSTEM.format(
-        supplier_profile_json=json.dumps(supplier_profile, indent=2),
-        agent_config_json=json.dumps(agent_config, indent=2),
+    trade_name = supplier_profile.get("trade_name", "our company")
+    location = f"{supplier_profile.get('city', '')}, {supplier_profile.get('state', 'India')}".strip(", ")
+
+    system = SUPPLIER_AGENT_SYSTEM.format(
+        trade_name=trade_name,
+        location=location,
+        profile_md=profile_md or f"Supplier: {trade_name}, Location: {location}",
+        seller_settings_md=seller_settings_md or "Standard negotiation — professional and balanced.",
     )
-    system = build_agent_system_prompt(base_system, profile_md, seller_settings_md)
 
-    context = f"[Round {negotiation_round} of {max_rounds}]"
-
+    # Build conversation history for context
     messages = []
     for msg in conversation_history:
-        role = "user" if msg["role"] in ("ai_buyer", "human_buyer") else "assistant"
-        messages.append({"role": role, "content": [{"text": msg["content"]}]})
-    messages.append({"role": "user", "content": [{"text": f"{context}\nBuyer: {buyer_message}"}]})
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role in ("ai_buyer", "human_buyer", "user"):
+            messages.append({"role": "user", "content": [{"text": content}]})
+        elif role in ("ai_supplier", "assistant"):
+            messages.append({"role": "assistant", "content": [{"text": content}]})
 
-    response = await call_qwen3(messages, system_prompt=system, max_tokens=512, temperature=0.6)
+    # Add current buyer message
+    messages.append({
+        "role": "user",
+        "content": [{"text": buyer_message}]
+    })
 
-    # Parse special markers
+    response = await call_qwen3(
+        messages,
+        system_prompt=system,
+        max_tokens=500,
+        temperature=0.75,
+    )
+
+    # Parse markers
     needs_input = "<NEEDS_SUPPLIER_INPUT" in response
     input_reason = ""
     if needs_input:
@@ -169,31 +163,19 @@ async def supplier_agent_respond(
             end = response.index('"', start)
             input_reason = response[start:end]
         except ValueError:
-            input_reason = "This order needs your review before proceeding"
+            input_reason = "This order needs your review"
 
-    # Extract offer
-    extracted_offer = None
-    is_deal_closed = False
-    if "<OFFER " in response:
-        try:
-            offer_str = response[response.index("<OFFER "):response.index("/>", response.index("<OFFER ")) + 2]
-            extracted_offer = _parse_offer_tag(offer_str)
-        except Exception:
-            pass
+    extracted_offer = _extract_offer(response)
+    is_deal_closed = _detect_acceptance(buyer_message)
 
-    # Check if buyer accepted (detect acceptance language)
-    acceptance_keywords = ["accept", "confirm", "deal confirmed", "we accept", "agreed"]
-    if any(kw in buyer_message.lower() for kw in acceptance_keywords):
-        is_deal_closed = True
-
-    # Clean message
-    clean_message = response
-    for marker in ["<NEEDS_SUPPLIER_INPUT", "<OFFER ", "/>"]:
-        if marker in clean_message:
-            clean_message = clean_message[:clean_message.index(marker)].strip()
+    # Clean markers from display message
+    clean = response
+    for tag in ["<NEEDS_SUPPLIER_INPUT", "<OFFER "]:
+        if tag in clean:
+            clean = clean[:clean.index(tag)].strip()
 
     return {
-        "message": clean_message or response,
+        "message": clean or response,
         "needs_supplier_input": needs_input,
         "supplier_input_reason": input_reason,
         "extracted_offer": extracted_offer,
@@ -201,26 +183,37 @@ async def supplier_agent_respond(
     }
 
 
+def _extract_offer(text: str) -> dict | None:
+    if "<OFFER " not in text:
+        return None
+    try:
+        start = text.index("<OFFER ")
+        end = text.index("/>", start) + 2
+        offer_str = text[start:end]
+        attrs = re.findall(r'(\w+)="([^"]*)"', offer_str)
+        result = {}
+        for key, val in attrs:
+            try:
+                result[key] = float(val) if "." in val else int(val)
+            except ValueError:
+                result[key] = val
+        return result
+    except Exception:
+        return None
+
+
+def _detect_acceptance(message: str) -> bool:
+    keywords = ["accept", "confirm", "deal done", "we agree", "finaliz", "go ahead", "proceed", "approved", "perfect deal"]
+    return any(kw in message.lower() for kw in keywords)
+
+
 def get_default_agent_config() -> dict:
-    """Default agent config for new suppliers."""
     return {
         "negotiation_style": "balanced",
-        "max_rounds": 5,
+        "max_rounds": 999,
         "auto_accept_score": 80,
         "auto_decline_score": 40,
-        "escalation_order_value": 500000,  # INR 5 lakhs
+        "escalation_order_value": 500000,
         "volume_discount_rules": [],
-        "price_floors": {},  # populated from supplier catalog
+        "price_floors": {},
     }
-
-
-def _parse_offer_tag(offer_str: str) -> dict:
-    import re
-    attrs = re.findall(r'(\w+)="([^"]*)"', offer_str)
-    result = {}
-    for key, val in attrs:
-        try:
-            result[key] = float(val) if "." in val else int(val)
-        except ValueError:
-            result[key] = val
-    return result
