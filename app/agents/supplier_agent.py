@@ -99,6 +99,8 @@ async def generate_supplier_opener(
     requirement: dict,
     supplier_profile: dict,
     agent_config: dict,
+    profile_md: str = "",
+    seller_settings_md: str = "",
 ) -> dict:
     """Generate the supplier's opening offer message to the buyer's agent."""
     base_system = SUPPLIER_AGENT_SYSTEM.format(

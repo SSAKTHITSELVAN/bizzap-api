@@ -10,6 +10,7 @@ class Requirement(Base):
     id = Column(Integer, primary_key=True, index=True)
     buyer_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
+
     # Core mandatory fields
     product = Column(String(255), nullable=False)
     quantity = Column(Float, nullable=False)

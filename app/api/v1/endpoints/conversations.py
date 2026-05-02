@@ -118,13 +118,15 @@ async def send_message(
     lead_result = await db.execute(select(Lead).where(Lead.id == conversation.lead_id))
     lead = lead_result.scalar_one_or_none()
 
-    # Check if human chat is enabled
-    if is_buyer and not lead.buyer_chat_enabled:
+    # After deal closed, always allow human chat (for delivery coordination)
+    if lead.status == "deal_closed":
+        pass  # always allow
+    elif is_buyer and not lead.buyer_chat_enabled:
         raise HTTPException(
             status_code=403,
             detail="AI is negotiating on your behalf. Enable 'Live' mode to chat manually."
         )
-    if is_supplier and not lead.supplier_chat_enabled:
+    elif is_supplier and not lead.supplier_chat_enabled:
         raise HTTPException(
             status_code=403,
             detail="AI is negotiating on your behalf. Enable 'Live' mode to chat manually."
@@ -146,17 +148,16 @@ async def send_message(
     # AI responds on the other side if AI is still active
     ai_response_msg = None
 
-    if is_buyer and conversation.mode in ("ai_negotiating", "hybrid"):
-        # Buyer sent message — supplier's AI responds
-        ai_response_msg = await _trigger_supplier_ai_response(
-            conversation, lead, request.content, db
-        )
-
-    elif is_supplier and conversation.mode in ("ai_negotiating", "hybrid"):
-        # Supplier sent message — buyer's AI responds
-        ai_response_msg = await _trigger_buyer_ai_response(
-            conversation, lead, request.content, db
-        )
+    # AI only responds if deal NOT closed and mode is ai_negotiating/hybrid
+    if lead.status != "deal_closed":
+        if is_buyer and conversation.mode in ("ai_negotiating", "hybrid"):
+            ai_response_msg = await _trigger_supplier_ai_response(
+                conversation, lead, request.content, db
+            )
+        elif is_supplier and conversation.mode in ("ai_negotiating", "hybrid"):
+            ai_response_msg = await _trigger_buyer_ai_response(
+                conversation, lead, request.content, db
+            )
 
     await db.flush()
 
@@ -238,11 +239,22 @@ async def handle_buyer_decision(
     if action == "accept":
         lead.status = "deal_closed"
         lead.deal_closed_at = datetime.utcnow()
+        # AI turns OFF — human chat auto-enables for delivery coordination
+        lead.buyer_chat_enabled = True
+        lead.supplier_chat_enabled = True
+        # Update conversation mode to manual
+        conv_result = await db.execute(select(Conversation).where(Conversation.lead_id == lead.id))
+        conv = conv_result.scalar_one_or_none()
+        if conv:
+            conv.mode = "manual"
         # Create deal record
         await _create_deal(lead, db)
-        # Post system message
-        await _post_system_message(lead.id, "🎉 Deal accepted! Both parties have been notified.", db)
-        return {"success": True, "status": "deal_closed", "message": "Deal confirmed!"}
+        await _post_system_message(
+            lead.id,
+            "🎉 Deal confirmed! AI negotiation complete. You can now chat directly with the seller about delivery, packaging, and payment.",
+            db
+        )
+        return {"success": True, "status": "deal_closed", "message": "Deal confirmed! Human chat enabled."}
 
     elif action == "renegotiate":
         if not request.renegotiate_target:
