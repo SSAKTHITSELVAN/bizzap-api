@@ -39,6 +39,7 @@ class AgenticProfile(Base):
 
     # Profile build status
     profile_build_status = Column(String(50), default="pending")  # pending | building | complete | failed
+    profile_build_stage = Column(String(100), nullable=True)      # current pipeline stage detail
     profile_summary = Column(Text, nullable=True)        # AI-generated business summary
 
     # Role derived from profile

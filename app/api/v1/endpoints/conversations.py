@@ -372,9 +372,9 @@ async def _trigger_supplier_ai_response(
         lead.ai_paused_for_supplier = True
     lead.negotiation_round += 1
 
-    # Update AI context
+    # Update AI context — use consistent role names for the agent loop
     updated_context = history + [
-        {"role": "human_buyer", "content": buyer_message},
+        {"role": "ai_buyer", "content": buyer_message},
         {"role": "ai_supplier", "content": response["message"]},
     ]
     conversation.ai_context = updated_context
@@ -434,6 +434,7 @@ async def _trigger_buyer_ai_response(
         lead.status = "offer_ready"
     lead.negotiation_round += 1
 
+    # Update AI context — use consistent role names for the agent loop
     updated_context = history + [
         {"role": "ai_supplier", "content": supplier_message},
         {"role": "ai_buyer", "content": response["message"]},
@@ -447,74 +448,114 @@ async def _trigger_buyer_ai_response(
 
 async def _run_autonomous_negotiation_round(lead_id: int):
     """
-    Autonomous negotiation loop — runs in background.
-    Seller responds → Buyer responds → repeat until:
-    - Deal accepted (auto-accept rule hit)
-    - Buyer needs input (escalation)  
-    - Both sides agree
-    No round limit — runs until natural conclusion.
+    Autonomous negotiation loop — runs as a single long-lived coroutine.
+    Alternates: Supplier responds → Buyer responds → repeat until:
+    - Deal accepted (buyer signals acceptance)
+    - Buyer walks away
+    - Escalation needed (buyer or supplier)
+    - Max safety limit (20 rounds)
     """
     from app.db.base import AsyncSessionLocal
     from app.models.lead import Lead
+    import asyncio
     import logging
     logger = logging.getLogger(__name__)
 
-    async with AsyncSessionLocal() as db:
-        try:
-            lead_result = await db.execute(select(Lead).where(Lead.id == lead_id))
-            lead = lead_result.scalar_one_or_none()
-            if not lead:
-                return
-            if lead.status in ("deal_closed", "declined"):
-                return
-            if lead.ai_paused_for_buyer or lead.ai_paused_for_supplier:
-                return
+    MAX_ROUNDS = 20  # safety limit to prevent infinite loops
 
-            conv_result = await db.execute(
-                select(Conversation).where(Conversation.lead_id == lead_id)
-            )
-            conversation = conv_result.scalar_one_or_none()
-            if not conversation or conversation.mode not in ("ai_negotiating", "hybrid"):
-                return
+    for round_num in range(MAX_ROUNDS):
+        # Small delay between rounds to avoid hammering the LLM
+        if round_num > 0:
+            await asyncio.sleep(2)
 
-            # Get last message from AI context
-            history = conversation.ai_context or []
-            if not history:
-                return
+        async with AsyncSessionLocal() as db:
+            try:
+                lead_result = await db.execute(select(Lead).where(Lead.id == lead_id))
+                lead = lead_result.scalar_one_or_none()
+                if not lead:
+                    logger.info(f"[AUTO] Lead #{lead_id}: not found, stopping")
+                    return
+                if lead.status in ("deal_closed", "declined", "not_selected"):
+                    logger.info(f"[AUTO] Lead #{lead_id}: status={lead.status}, stopping")
+                    return
+                if lead.ai_paused_for_buyer or lead.ai_paused_for_supplier:
+                    logger.info(f"[AUTO] Lead #{lead_id}: paused for human, stopping")
+                    return
 
-            last_msg = history[-1]
-            last_role = last_msg.get("role", "")
-            last_content = last_msg.get("content", "")
-
-            logger.info(f"[AUTO] Lead #{lead_id} round {lead.negotiation_round}: last role={last_role}")
-
-            if last_role in ("ai_buyer", "user"):
-                # Buyer just spoke → supplier AI responds
-                supplier_msg = await _trigger_supplier_ai_response(
-                    conversation, lead, last_content, db
+                conv_result = await db.execute(
+                    select(Conversation).where(Conversation.lead_id == lead_id)
                 )
-                await db.commit()
+                conversation = conv_result.scalar_one_or_none()
+                if not conversation or conversation.mode not in ("ai_negotiating", "hybrid"):
+                    logger.info(f"[AUTO] Lead #{lead_id}: mode={conversation.mode if conversation else 'none'}, stopping")
+                    return
 
-                if supplier_msg and not lead.ai_paused_for_supplier and lead.status != "deal_closed":
-                    # Continue loop — buyer now responds
-                    import asyncio
-                    asyncio.create_task(_run_autonomous_negotiation_round(lead_id))
+                history = conversation.ai_context or []
+                if not history:
+                    logger.info(f"[AUTO] Lead #{lead_id}: no history, stopping")
+                    return
 
-            elif last_role in ("ai_supplier", "assistant"):
-                # Supplier just spoke → buyer AI responds
-                buyer_msg = await _trigger_buyer_ai_response(
-                    conversation, lead, last_content, db
-                )
-                await db.commit()
+                last_msg = history[-1]
+                last_role = last_msg.get("role", "")
+                last_content = last_msg.get("content", "")
 
-                if buyer_msg and not lead.ai_paused_for_buyer and lead.status not in ("deal_closed", "offer_ready"):
-                    # Continue loop — supplier now responds
-                    import asyncio
-                    asyncio.create_task(_run_autonomous_negotiation_round(lead_id))
+                logger.info(f"[AUTO] Lead #{lead_id} round {lead.negotiation_round}: last_role={last_role}")
 
-        except Exception as e:
-            logger.error(f"[AUTO] Lead #{lead_id} loop error: {e}")
-            import traceback; traceback.print_exc()
+                if last_role in ("ai_buyer", "user"):
+                    # Buyer just spoke → supplier AI responds
+                    supplier_msg = await _trigger_supplier_ai_response(
+                        conversation, lead, last_content, db
+                    )
+                    await db.commit()
+
+                    if not supplier_msg:
+                        logger.warning(f"[AUTO] Lead #{lead_id}: supplier response failed, stopping")
+                        return
+                    if lead.ai_paused_for_supplier:
+                        logger.info(f"[AUTO] Lead #{lead_id}: supplier escalated, stopping")
+                        return
+                    if lead.status == "deal_closed":
+                        logger.info(f"[AUTO] Lead #{lead_id}: deal closed by supplier, stopping")
+                        return
+                    # Continue — buyer will respond next iteration
+
+                elif last_role in ("ai_supplier", "assistant"):
+                    # Supplier just spoke → buyer AI responds
+                    buyer_msg = await _trigger_buyer_ai_response(
+                        conversation, lead, last_content, db
+                    )
+                    await db.commit()
+
+                    if not buyer_msg:
+                        logger.warning(f"[AUTO] Lead #{lead_id}: buyer response failed, stopping")
+                        return
+                    if lead.ai_paused_for_buyer:
+                        logger.info(f"[AUTO] Lead #{lead_id}: buyer escalated, stopping")
+                        return
+                    if lead.status in ("deal_closed", "offer_ready"):
+                        logger.info(f"[AUTO] Lead #{lead_id}: status={lead.status}, stopping")
+                        return
+
+                    # Check if buyer is walking away
+                    buyer_content = buyer_msg.content or ""
+                    from app.agents.buyer_agent import _detect_walkaway
+                    if _detect_walkaway(buyer_content):
+                        lead.status = "declined"
+                        await db.commit()
+                        logger.info(f"[AUTO] Lead #{lead_id}: buyer walked away, stopping")
+                        return
+                    # Continue — supplier will respond next iteration
+
+                else:
+                    logger.warning(f"[AUTO] Lead #{lead_id}: unknown last_role={last_role}, stopping")
+                    return
+
+            except Exception as e:
+                logger.error(f"[AUTO] Lead #{lead_id} round error: {e}")
+                import traceback; traceback.print_exc()
+                return
+
+    logger.info(f"[AUTO] Lead #{lead_id}: hit max rounds ({MAX_ROUNDS}), stopping")
 
 async def _post_system_message(lead_id: int, content: str, db: AsyncSession):
     """Post a system notification message to the conversation."""

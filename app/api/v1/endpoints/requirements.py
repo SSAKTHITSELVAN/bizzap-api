@@ -284,7 +284,7 @@ async def _initiate_seller_conversation(lead_id: int):
                 buyer_id=lead.buyer_id,
                 supplier_id=lead.supplier_id,
                 mode="ai_negotiating",
-                ai_context=[{"role": "assistant", "content": seller_msg_text}],
+                ai_context=[{"role": "ai_supplier", "content": seller_msg_text}],
             )
             db.add(conversation)
             await db.flush()
@@ -329,8 +329,8 @@ async def _initiate_seller_conversation(lead_id: int):
 
             # Update AI context
             conversation.ai_context = [
-                {"role": "assistant", "content": seller_msg_text},
-                {"role": "user",      "content": buyer_msg_text},
+                {"role": "ai_supplier", "content": seller_msg_text},
+                {"role": "ai_buyer",    "content": buyer_msg_text},
             ]
 
             lead.status = "negotiating"

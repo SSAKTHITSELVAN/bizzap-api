@@ -1,7 +1,7 @@
 """
 Buyer Agent — Human-like B2B procurement agent representing the buyer.
 Reads full buyer profile + settings. Negotiates naturally to get best price.
-One response at a time. Strategic. Pushes back. Closes when terms are good.
+Conversations flow like real business discussions — answer questions, negotiate, close.
 """
 import json
 import re
@@ -18,33 +18,65 @@ ABOUT YOUR COMPANY (BUYER):
 YOUR PROCUREMENT SETTINGS & PRIORITIES:
 {buyer_settings_md}
 
+THE REQUIREMENT YOU'RE SOURCING:
+- Product: {product}
+- Quantity: {quantity} {qty_unit}
+- Budget ceiling: ₹{budget_max}/unit (NEVER reveal this exact number to supplier)
+- Delivery location: {delivery_location}
+- Delivery deadline: {delivery_days} days
+- Specifications: {specifications}
+
 YOUR PERSONALITY & STYLE:
 - Professional, direct, and strategic — you know what you want
-- You respond naturally to what the supplier says — one focused response at a time
-- You share relevant context about your need when it helps the negotiation
-- You push back on price but don't be rude — this is a long-term relationship
+- You respond naturally to what the supplier says — answer their questions helpfully
+- You share relevant context about your need when it helps move things forward
+- You push back on price but stay respectful — this is a long-term relationship
 - You recognize quality and are willing to pay fair value — but always try for better
+- Keep responses concise (2-5 sentences max)
 - Natural language — "That's higher than what we had in mind", "We appreciate the offer but..."
 
-NEGOTIATION STRATEGY:
-- Always try to get 5-10% below the quoted price at minimum
-- Use logic: volume, quick payment, repeat business as leverage
-- If price is within 5% of budget, consider accepting after 1-2 rounds
-- If price is way above budget, counter firmly or walk away after 2 attempts
-- Ask about delivery, quality, samples, certifications when relevant
-- Never reveal your exact budget ceiling
+CONVERSATION FLOW (follow this strictly):
+Phase 1 — ANSWERING QUESTIONS:
+  - When supplier asks about your requirements, answer clearly and helpfully
+  - Provide specifics: sizes, colors, material preference, timeline
+  - Don't volunteer budget — answer what's asked
+  - Be cooperative — you WANT a good quote from them
 
-RESPONSE RULES:
-- Respond directly to what the supplier just said
-- If they asked a question, answer it AND move negotiation forward
-- If they quoted a price, counter or accept based on your settings
-- Keep responses concise and natural — like a real business conversation
-- When you're happy with the terms, signal acceptance clearly
+Phase 2 — EVALUATING OFFERS:
+  - When supplier quotes a price, compare to your budget ceiling internally
+  - If price ≤ budget: negotiate 5-10% lower anyway (don't accept first offer)
+  - If price is 1-10% above budget: counter firmly but stay engaged
+  - If price is 10-20% above: push hard, suggest alternatives
+  - If price is >20% above: express concern, ask what can change to bring cost down
 
-ACCEPTANCE SIGNAL (when deal is good):
-Say something like: "That works for us. Let's proceed." or "Agreed on those terms."
+Phase 3 — NEGOTIATION:
+  - Use these levers: volume commitment, quick payment, repeat orders, flexibility on specs
+  - Counter with a specific number — don't just say "lower please"
+  - Maximum 3-4 counter rounds before deciding
+  - If supplier holds firm at a reasonable price (within 5% of budget), accept
 
-Remember: You're protecting your company's procurement budget while building a good supplier relationship."""
+Phase 4 — CLOSING:
+  - When terms are acceptable, signal clearly: "That works for us. Let's proceed."
+  - Confirm: quantity, price, delivery timeline, payment terms
+  - Ask about next steps (samples, PO, advance payment)
+
+ACCEPTANCE SIGNALS (use one of these when deal is good):
+- "That works for us. Let's proceed."
+- "Agreed on those terms. Please share next steps."
+- "We'll take it at that price. How do we proceed?"
+
+WALK-AWAY SIGNALS (when supplier won't budge and price is too high):
+- "I appreciate your time, but this doesn't fit our budget. We'll look at other options."
+- Only walk away after 3+ rounds of negotiation with no movement
+
+IMPORTANT RULES:
+- NEVER reveal your exact budget ceiling (₹{budget_max})
+- Always answer supplier's questions — don't dodge or deflect
+- When price is quoted, always respond with your position (accept/counter/ask questions)
+- Don't bring up topics the supplier hasn't raised yet — stay responsive
+- If supplier asks about urgency/timeline, be honest about your deadline
+
+Remember: You're protecting your company's budget while building a good supplier relationship."""
 
 
 async def generate_buyer_opener(
@@ -55,35 +87,41 @@ async def generate_buyer_opener(
 ) -> dict:
     """Generate buyer's opening inquiry to the supplier."""
 
-    system = BUYER_AGENT_SYSTEM.format(
-        profile_md=profile_md or "B2B buyer looking for quality products at competitive prices.",
-        buyer_settings_md=buyer_settings_md or "Standard procurement — quality and price balanced.",
-    )
-
-    trade_name = supplier_profile.get("trade_name", "your company")
     product = requirement.get("product", "product")
     quantity = requirement.get("quantity", "")
     qty_unit = requirement.get("quantity_unit", "units")
-    budget = requirement.get("budget_max", "")
+    budget_max = requirement.get("budget_max", "")
     delivery_location = requirement.get("delivery_location", "")
+    delivery_days = requirement.get("delivery_days", "")
     specs = requirement.get("specifications") or {}
 
-    prompt = f"""You are reaching out to {trade_name} about this requirement:
+    system = BUYER_AGENT_SYSTEM.format(
+        profile_md=profile_md or "B2B buyer looking for quality products at competitive prices.",
+        buyer_settings_md=buyer_settings_md or "Standard procurement — quality and price balanced.",
+        product=product,
+        quantity=quantity,
+        qty_unit=qty_unit,
+        budget_max=budget_max,
+        delivery_location=delivery_location,
+        delivery_days=delivery_days or "flexible",
+        specifications=json.dumps(specs) if specs else "Standard quality",
+    )
 
-Product: {product}
-Quantity: {quantity} {qty_unit}
-Delivery: {delivery_location}
-Specifications: {json.dumps(specs) if specs else "Standard quality"}
+    trade_name = supplier_profile.get("trade_name", "your company")
 
-Write a professional opening message to this supplier.
-- Briefly introduce yourself/your company
-- State your requirement clearly
+    prompt = f"""You are reaching out to {trade_name} about your requirement.
+
+Write a professional opening message:
+- Briefly introduce yourself/your company (1 sentence)
+- State what you need: {product}, {quantity} {qty_unit}
+- Mention key specs if any: {json.dumps(specs) if specs else "standard quality"}
+- Mention delivery to {delivery_location}
 - Ask for their best offer (price, lead time, payment terms)
-- Keep it concise and professional — 3-4 sentences
-- Don't reveal your budget ceiling"""
+- Keep it concise — 3-4 sentences
+- Do NOT reveal your budget ceiling"""
 
     messages = [{"role": "user", "content": [{"text": prompt}]}]
-    response = await call_qwen3(messages, system_prompt=system, max_tokens=300, temperature=0.7)
+    response = await call_qwen3(messages, system_prompt=system, max_tokens=250, temperature=0.7)
 
     return {"message": response, "needs_buyer_input": False}
 
@@ -99,16 +137,27 @@ async def buyer_agent_respond(
 ) -> dict:
     """
     Generate buyer's natural response to supplier's message.
-    Negotiates strategically. Pushes back on price. Closes when terms are good.
+    Answers questions, negotiates strategically, closes when terms are good.
     """
+    product = requirement.get("product", "product")
+    quantity = requirement.get("quantity", "")
+    qty_unit = requirement.get("quantity_unit", "units")
+    budget_max = requirement.get("budget_max", 0)
+    delivery_location = requirement.get("delivery_location", "")
+    delivery_days = requirement.get("delivery_days", "")
+    specs = requirement.get("specifications") or {}
+
     system = BUYER_AGENT_SYSTEM.format(
         profile_md=profile_md or "B2B buyer looking for quality products at competitive prices.",
         buyer_settings_md=buyer_settings_md or "Standard procurement — quality and price balanced.",
+        product=product,
+        quantity=quantity,
+        qty_unit=qty_unit,
+        budget_max=budget_max,
+        delivery_location=delivery_location,
+        delivery_days=delivery_days or "flexible",
+        specifications=json.dumps(specs) if specs else "Standard quality",
     )
-
-    budget_max = requirement.get("budget_max", 0)
-    product = requirement.get("product", "product")
-    quantity = requirement.get("quantity", "")
 
     # Build conversation history
     messages = []
@@ -120,29 +169,26 @@ async def buyer_agent_respond(
         elif role in ("ai_buyer", "human_buyer", "user"):
             messages.append({"role": "assistant", "content": [{"text": content}]})
 
-    # Current supplier message
-    context = f"""The supplier just said: "{supplier_message}"
+    # Current supplier message with context
+    round_context = ""
+    if negotiation_round >= 5:
+        round_context = "\n[Note: You've been negotiating for several rounds. Make a decision soon — accept if terms are reasonable, or walk away if they won't budge.]"
 
-Your requirement context:
-- Product: {product}
-- Quantity: {quantity}
-- Your budget ceiling: ₹{budget_max}/unit (don't reveal this exact number)
-- Round: {negotiation_round}
-
-Respond naturally to what they said. If they gave a price, counter or accept based on how it compares to your budget.
-If they asked a question, answer it and keep negotiation moving forward."""
-
-    messages.append({"role": "user", "content": [{"text": context}]})
+    messages.append({
+        "role": "user",
+        "content": [{"text": f"{supplier_message}{round_context}"}]
+    })
 
     response = await call_qwen3(
         messages,
         system_prompt=system,
-        max_tokens=400,
-        temperature=0.75,
+        max_tokens=350,
+        temperature=0.7,
     )
 
     # Detect if buyer is accepting
     is_accepting = _detect_acceptance(response)
+    is_walking_away = _detect_walkaway(response)
     needs_input = "<NEEDS_BUYER_INPUT" in response
 
     extracted_offer = _extract_counter_offer(response)
@@ -166,14 +212,25 @@ If they asked a question, answer it and keep negotiation moving forward."""
         "buyer_input_reason": input_reason,
         "extracted_offer": extracted_offer,
         "is_deal_ready": is_accepting,
+        "is_walking_away": is_walking_away,
     }
 
 
 def _detect_acceptance(message: str) -> bool:
     keywords = [
-        "let's proceed", "agreed", "that works", "we accept", "confirm",
-        "deal done", "go ahead", "approved", "we're happy", "finaliz",
-        "we'll take it", "please proceed", "works for us"
+        "let's proceed", "agreed", "that works", "we accept", "confirm the order",
+        "deal done", "go ahead", "approved", "we're happy with", "finaliz",
+        "we'll take it", "please proceed", "works for us", "we agree to",
+        "let's move forward", "we can proceed",
+    ]
+    return any(kw in message.lower() for kw in keywords)
+
+
+def _detect_walkaway(message: str) -> bool:
+    keywords = [
+        "look at other options", "doesn't fit our budget", "we'll pass",
+        "not going to work", "can't proceed at this price", "too expensive for us",
+        "we'll have to decline",
     ]
     return any(kw in message.lower() for kw in keywords)
 
@@ -181,8 +238,8 @@ def _detect_acceptance(message: str) -> bool:
 def _extract_counter_offer(text: str) -> dict | None:
     """Extract if buyer is proposing a specific counter price."""
     price_patterns = [
-        r'₹(\d+(?:,\d+)?(?:\.\d+)?)\s*(?:per\s*piece|per\s*unit|\/piece|\/unit)',
-        r'(\d+(?:,\d+)?(?:\.\d+)?)\s*(?:per\s*piece|per\s*unit|\/piece|\/unit)',
+        r'₹\s*([\d,]+(?:\.\d+)?)\s*(?:per\s*piece|per\s*unit|/piece|/unit)',
+        r'([\d,]+(?:\.\d+)?)\s*(?:per\s*piece|per\s*unit|/piece|/unit)',
     ]
     for pattern in price_patterns:
         match = re.search(pattern, text, re.IGNORECASE)

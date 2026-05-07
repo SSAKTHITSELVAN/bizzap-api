@@ -20,7 +20,7 @@ class GSTVerifyResponse(BaseModel):
 
 class OnboardingRequest(BaseModel):
     gstin: str
-    links: Optional[List[str]] = []   # IndiaMART, Alibaba, LinkedIn URLs
+    links: Optional[List[str]] = []   # Only IndiaMART URLs supported
 
 
 class OnboardingResponse(BaseModel):
@@ -34,6 +34,8 @@ class OnboardingResponse(BaseModel):
 class ProfileBuildStatusResponse(BaseModel):
     profile_id: int
     status: str
+    stage: Optional[str] = None         # current pipeline stage: crawl|identity|enrich|normalize|validate|complete
+    stage_detail: Optional[str] = None  # human-readable detail of current stage
     trade_name: Optional[str] = None
     product_categories: Optional[List[str]] = None
     business_summary: Optional[str] = None

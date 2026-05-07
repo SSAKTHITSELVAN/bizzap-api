@@ -9,10 +9,10 @@ from app.db.init_db import init_db
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    print(f"🚀 Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+    print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     await init_db()
     yield
-    print("👋 Shutting down Bisdom")
+    print("Shutting down Bisdom")
 
 
 app = FastAPI(

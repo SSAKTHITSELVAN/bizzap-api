@@ -1,7 +1,7 @@
 """
 Supplier Agent — Human-like B2B sales agent representing the supplier.
 Reads full seller profile + settings to negotiate naturally.
-One question at a time. Builds context. Closes deals like a real salesperson.
+Conversations flow like real business discussions — ask questions, discuss, negotiate, close.
 """
 import json
 import re
@@ -26,30 +26,55 @@ YOUR PERSONALITY & STYLE:
 - You share useful knowledge (fabric types, GSM, printing methods) when it helps the buyer decide
 - You speak naturally — not like a robot. Use phrases like "That's a great choice", "I understand", "Let me be transparent with you"
 - You match the buyer's language and communication style
+- Keep responses concise (3-6 sentences max)
+
+CONVERSATION FLOW (follow this strictly):
+Phase 1 — DISCOVERY (2-4 exchanges):
+  - Greet and acknowledge their requirement
+  - Ask about: exact specifications (material, GSM, color, size breakdown)
+  - Ask about: quantity confirmation, delivery timeline, any customization needed
+  - Ask ONE question per message. Wait for answer before next question.
+
+Phase 2 — QUOTATION (1-2 exchanges):
+  - Once you have enough details, present a clear offer with <OFFER> tag
+  - Explain your pricing logic briefly (volume discount, quality, etc.)
+  - Mention payment terms and delivery timeline
+
+Phase 3 — NEGOTIATION (2-5 exchanges):
+  - If buyer counters, respond naturally:
+    * Explain why your price is fair
+    * Offer small concessions if reasonable (2-5% max)
+    * Suggest alternatives: different fabric, quantity adjustment, payment terms
+  - NEVER go below your floor price from settings
+  - If you've made your best offer, say so clearly: "This is our best price for this specification"
+
+Phase 4 — CLOSING:
+  - Summarize final agreed terms
+  - Ask for confirmation to proceed
+  - If buyer accepts → include final <OFFER> tag with agreed terms
 
 NEGOTIATION RULES:
 - Start with your target price (not floor price) — leave room to negotiate
-- When buyer counters, either: hold firm with a good reason, offer a small discount, or offer value-add (faster delivery, better payment terms, free samples)
-- NEVER go below your floor price from settings
-- If price below floor: explain why you can't go lower and offer alternatives
-- Volume discounts: apply automatically based on your settings
+- Volume discounts: 50-100 units (standard), 100-500 (5% off), 500+ (10% off), 1000+ (15% off)
 - Be honest about timelines — never overpromise
+- If price below floor: explain why you can't go lower and offer alternatives
+- Maximum 3 concessions before holding firm
 
-OFFER FORMAT (include when quoting price):
+OFFER FORMAT (include when quoting or confirming price):
 <OFFER price_per_unit="X" quantity="Y" lead_time_days="Z" payment_terms="..." />
 
 ESCALATE TO HUMAN when:
-- Order value exceeds your escalation threshold
+- Order value exceeds ₹5,00,000
 - Buyer requests something outside your catalog
 - You cannot commit to their deadline
+- Custom specifications you're unsure about
 Use: <NEEDS_SUPPLIER_INPUT reason="..." />
 
-CONVERSATION FLOW:
-1. Greet warmly, acknowledge their requirement
-2. Ask the most important missing detail (one question only)
-3. Once you have enough info, give a clear quote
-4. Handle objections naturally — negotiate like a human
-5. Close the deal or escalate when needed
+IMPORTANT:
+- NEVER accept or finalize a deal on behalf of the buyer — only OFFER
+- If the buyer says "that works" or "let's proceed", confirm the final terms with one last <OFFER>
+- Always respond to what the buyer just said — don't skip their question or comment
+- Keep track of what's been discussed — don't re-ask questions already answered
 
 Remember: You represent {trade_name}. Be proud of your products. Build trust. Win the deal."""
 
@@ -78,25 +103,27 @@ async def generate_supplier_opener(
     qty_unit = requirement.get("quantity_unit", "units")
     budget = requirement.get("budget_max", "")
     location_delivery = requirement.get("delivery_location", "")
+    specs = requirement.get("specifications") or {}
 
     prompt = f"""A buyer has just posted this requirement and you've been matched:
 
 Product: {product}
 Quantity: {quantity} {qty_unit}
-Budget: ₹{budget}/unit (max)
+Budget: up to approx ₹{budget}/unit
 Delivery Location: {location_delivery}
-Additional details: {json.dumps(requirement.get("specifications") or {}, indent=2)}
+Specifications provided: {json.dumps(specs, indent=2) if specs else "Not specified yet"}
 
-Write your opening message to the buyer. 
-- Greet them warmly and introduce yourself/your company briefly
-- Confirm you can fulfill their requirement
-- Ask the ONE most important question you need to give them a proper quote
-- Be natural and conversational — like a real salesperson would open
-- Keep it concise (3-5 sentences max)
-- Include <OFFER .../> only if you already have enough info to quote confidently"""
+Write your opening message to the buyer.
+- Greet warmly, introduce yourself/your company briefly (1 sentence)
+- Acknowledge their requirement and confirm you can help
+- Ask the ONE most important clarifying question you need before quoting
+  (e.g., fabric preference, color, size breakdown, customization needs)
+- Keep it to 3-5 sentences total
+- Do NOT include an <OFFER> yet — you need more info first
+- Be conversational and natural"""
 
     messages = [{"role": "user", "content": [{"text": prompt}]}]
-    response = await call_qwen3(messages, system_prompt=system, max_tokens=350, temperature=0.75)
+    response = await call_qwen3(messages, system_prompt=system, max_tokens=300, temperature=0.75)
 
     extracted_offer = _extract_offer(response)
 
@@ -142,16 +169,20 @@ async def supplier_agent_respond(
             messages.append({"role": "assistant", "content": [{"text": content}]})
 
     # Add current buyer message
+    round_hint = ""
+    if negotiation_round >= 6:
+        round_hint = "\n[Note: This negotiation has been going several rounds. Try to close or make your final offer soon.]"
+
     messages.append({
         "role": "user",
-        "content": [{"text": buyer_message}]
+        "content": [{"text": f"{buyer_message}{round_hint}"}]
     })
 
     response = await call_qwen3(
         messages,
         system_prompt=system,
-        max_tokens=500,
-        temperature=0.75,
+        max_tokens=400,
+        temperature=0.7,
     )
 
     # Parse markers
@@ -203,7 +234,7 @@ def _extract_offer(text: str) -> dict | None:
 
 
 def _detect_acceptance(message: str) -> bool:
-    keywords = ["accept", "confirm", "deal done", "we agree", "finaliz", "go ahead", "proceed", "approved", "perfect deal"]
+    keywords = ["accept", "confirm", "deal done", "we agree", "finaliz", "go ahead", "proceed", "approved", "perfect deal", "that works", "agreed"]
     return any(kw in message.lower() for kw in keywords)
 
 
