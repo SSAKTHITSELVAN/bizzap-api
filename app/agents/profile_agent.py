@@ -143,7 +143,8 @@ class CrawlerAgent:
         category_links = self._extract_category_links(products_html, base)
         await on_progress("crawl", f"Found {len(category_links)} categories")
 
-        for cat in category_links:
+        for idx, cat in enumerate(category_links, 1):
+            await on_progress("crawl", f"Crawling category {idx}/{len(category_links)}: {cat['category'][:40]}")
             cat_html = await _fetch(cat["url"])
             if not cat_html:
                 continue

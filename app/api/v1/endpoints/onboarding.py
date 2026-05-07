@@ -232,7 +232,22 @@ async def _build_profile_from_links(profile_id: int, links: list, gst_data: dict
             profile.profile_build_stage = "complete|Pipeline complete!"
 
             # Auto-generate profile_md for user config
-            profile_md_text = build_profile_md(gst_data, merged)
+            # Flatten pipeline data so build_profile_md can read trade_name, city, etc.
+            supplier = merged.get("supplier", {})
+            catalog = merged.get("product_catalog", [])
+            url_profile_flat = {
+                "trade_name": supplier.get("company_name") or supplier.get("trade_name"),
+                "city": supplier.get("location", {}).get("city"),
+                "state": supplier.get("location", {}).get("state"),
+                "product_categories": merged.get("product_categories", []),
+                "capabilities": supplier.get("capabilities", {}),
+                "serviceable_locations": merged.get("serviceable_locations", []),
+                "certifications": merged.get("certifications", []),
+                "payment_terms": merged.get("payment_terms", []),
+                "business_summary": summary,
+                "products": catalog,
+            }
+            profile_md_text = build_profile_md(gst_data, url_profile_flat)
 
             from sqlalchemy import select as sel2
             cfg_result = await db.execute(sel2(UserConfig).where(UserConfig.user_id == profile.user_id))

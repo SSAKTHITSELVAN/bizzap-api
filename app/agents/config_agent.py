@@ -24,6 +24,7 @@ def build_profile_md(gst_data: dict, url_profile: dict) -> str:
     locs  = url_profile.get("serviceable_locations") or []
     certs = url_profile.get("certifications") or []
     pay   = url_profile.get("payment_terms") or []
+    catalog = url_profile.get("products") or []
 
     lines = [
         f"# Business Profile — {name}",
@@ -49,23 +50,50 @@ def build_profile_md(gst_data: dict, url_profile: dict) -> str:
             lines.append(f"- {c}")
         lines.append("")
 
-    prods = caps.get("products") or []
-    if prods:
+    if catalog:
         lines += ["## Products & Specifications", ""]
-        for p in prods:
-            pname = p.get("name", "Product")
+        for p in catalog:
+            pname = p.get("product_name") or p.get("name", "Product")
             specs = p.get("specifications") or {}
-            spec_str = ", ".join(f"{k}: {v}" for k, v in specs.items()) if specs else ""
+            commercials = p.get("commercials") or {}
             lines.append(f"### {pname}")
-            if spec_str:
-                lines.append(f"- Specs: {spec_str}")
-            grades = p.get("grades") or []
-            if grades:
-                lines.append(f"- Grades: {', '.join(grades)}")
-            pcerts = p.get("certifications") or []
-            if pcerts:
-                lines.append(f"- Certifications: {', '.join(pcerts)}")
+            fabric = specs.get("fabric", {})
+            if fabric.get("type"):
+                lines.append(f"- Fabric: {fabric['type']}" + (f" ({fabric['composition']})" if fabric.get("composition") else ""))
+            gsm_val = specs.get("gsm", {}).get("value")
+            if gsm_val:
+                lines.append(f"- GSM: {gsm_val}")
+            price_val = commercials.get("price", {}).get("value")
+            if price_val:
+                lines.append(f"- Price: INR {price_val}/piece")
+            moq_val = commercials.get("moq", {}).get("value")
+            if moq_val:
+                lines.append(f"- MOQ: {moq_val} pieces")
+            sizes = p.get("sizes", {}).get("available", [])
+            if sizes:
+                lines.append(f"- Sizes: {', '.join(sizes)}")
+            methods = p.get("printing_capabilities", {}).get("supported_methods", [])
+            if methods:
+                lines.append(f"- Printing: {', '.join(methods)}")
             lines.append("")
+    else:
+        prods = caps.get("products") or []
+        if prods:
+            lines += ["## Products & Specifications", ""]
+            for p in prods:
+                pname = p.get("name", "Product")
+                specs = p.get("specifications") or {}
+                spec_str = ", ".join(f"{k}: {v}" for k, v in specs.items()) if specs else ""
+                lines.append(f"### {pname}")
+                if spec_str:
+                    lines.append(f"- Specs: {spec_str}")
+                grades = p.get("grades") or []
+                if grades:
+                    lines.append(f"- Grades: {', '.join(grades)}")
+                pcerts = p.get("certifications") or []
+                if pcerts:
+                    lines.append(f"- Certifications: {', '.join(pcerts)}")
+                lines.append("")
 
     if locs:
         lines += ["## Serviceable Locations", ", ".join(locs), ""]
