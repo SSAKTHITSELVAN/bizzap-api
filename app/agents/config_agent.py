@@ -57,15 +57,40 @@ def build_profile_md(gst_data: dict, url_profile: dict) -> str:
             specs = p.get("specifications") or {}
             commercials = p.get("commercials") or {}
             lines.append(f"### {pname}")
+            cat = p.get("category", "")
+            if cat:
+                lines.append(f"- Category: {cat}")
+            gender = p.get("target_gender", "")
+            if gender:
+                lines.append(f"- Target: {gender}")
             fabric = specs.get("fabric", {})
             if fabric.get("type"):
-                lines.append(f"- Fabric: {fabric['type']}" + (f" ({fabric['composition']})" if fabric.get("composition") else ""))
+                fabric_line = f"- Fabric: {fabric['type']}"
+                if fabric.get("composition"):
+                    fabric_line += f" ({fabric['composition']})"
+                if fabric.get("treatment"):
+                    fabric_line += f" — {fabric['treatment']}"
+                lines.append(fabric_line)
             gsm_val = specs.get("gsm", {}).get("value")
             if gsm_val:
-                lines.append(f"- GSM: {gsm_val}")
+                bucket = specs.get("gsm", {}).get("bucket", "")
+                lines.append(f"- GSM: {gsm_val}" + (f" [{bucket}]" if bucket and bucket != "unknown" else ""))
+            fit = specs.get("fit", "")
+            if fit:
+                lines.append(f"- Fit: {fit}")
+            neck = specs.get("neck_type", "")
+            if neck:
+                lines.append(f"- Neck: {neck}")
+            sleeve = specs.get("sleeve_type", "")
+            if sleeve:
+                lines.append(f"- Sleeve: {sleeve}")
+            colors = specs.get("color", [])
+            if colors:
+                lines.append(f"- Colors: {', '.join(colors[:8])}")
             price_val = commercials.get("price", {}).get("value")
             if price_val:
-                lines.append(f"- Price: INR {price_val}/piece")
+                bucket = commercials.get("price", {}).get("bucket", "")
+                lines.append(f"- Price: INR {price_val}/piece" + (f" [{bucket}]" if bucket and bucket != "unknown" else ""))
             moq_val = commercials.get("moq", {}).get("value")
             if moq_val:
                 lines.append(f"- MOQ: {moq_val} pieces")
@@ -75,6 +100,9 @@ def build_profile_md(gst_data: dict, url_profile: dict) -> str:
             methods = p.get("printing_capabilities", {}).get("supported_methods", [])
             if methods:
                 lines.append(f"- Printing: {', '.join(methods)}")
+            use_cases = p.get("use_cases", [])
+            if use_cases:
+                lines.append(f"- Use Cases: {', '.join(use_cases)}")
             lines.append("")
     else:
         prods = caps.get("products") or []
@@ -94,6 +122,14 @@ def build_profile_md(gst_data: dict, url_profile: dict) -> str:
                 if pcerts:
                     lines.append(f"- Certifications: {', '.join(pcerts)}")
                 lines.append("")
+
+    if caps and isinstance(caps, dict):
+        active_caps = [k.replace("_", " ").title() for k, v in caps.items() if v]
+        if active_caps:
+            lines += ["## Capabilities", ""]
+            for c in active_caps:
+                lines.append(f"- {c}")
+            lines.append("")
 
     if locs:
         lines += ["## Serviceable Locations", ", ".join(locs), ""]

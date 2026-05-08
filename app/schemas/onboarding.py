@@ -41,3 +41,13 @@ class ProfileBuildStatusResponse(BaseModel):
     business_summary: Optional[str] = None
     is_supplier: bool
     is_buyer: bool
+
+
+class BuildFromLinkRequest(BaseModel):
+    link: str
+
+
+class BuildFromLinkResponse(BaseModel):
+    success: bool
+    message: str
+    profile_build_status: str

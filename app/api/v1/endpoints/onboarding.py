@@ -10,6 +10,7 @@ from app.schemas.onboarding import (
     GSTVerifyRequest, GSTVerifyResponse,
     OnboardingRequest, OnboardingResponse,
     ProfileBuildStatusResponse,
+    BuildFromLinkRequest, BuildFromLinkResponse,
 )
 from app.services.gst_service import verify_gstin, extract_gst_profile
 from app.agents.profile_agent import (
@@ -176,6 +177,53 @@ async def get_profile_status(
         business_summary=profile.profile_summary,
         is_supplier=profile.is_supplier,
         is_buyer=profile.is_buyer,
+    )
+
+
+@router.post("/build-from-link", response_model=BuildFromLinkResponse)
+async def build_from_link(
+    request: BuildFromLinkRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger profile build from IndiaMART link (for users who skipped during onboarding)."""
+    link = request.link.strip()
+    if not link or INDIAMART_PATTERN not in link.lower():
+        raise HTTPException(status_code=400, detail="Only IndiaMART links are supported")
+
+    result = await db.execute(
+        select(AgenticProfile).where(AgenticProfile.user_id == current_user.id)
+    )
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found. Complete onboarding first.")
+
+    if profile.profile_build_status == "building":
+        raise HTTPException(status_code=409, detail="A build is already in progress")
+
+    # Fetch GST data for the profile enrichment step
+    gst_data = {}
+    if profile.gstin:
+        gst_result = await verify_gstin(profile.gstin)
+        if gst_result["valid"]:
+            gst_data = gst_result["data"]
+
+    profile.profile_build_status = "building"
+    profile.profile_build_stage = "crawl|Connecting to IndiaMART..."
+    await db.commit()
+
+    background_tasks.add_task(
+        _build_profile_from_links,
+        profile_id=profile.id,
+        links=[link],
+        gst_data=gst_data,
+    )
+
+    return BuildFromLinkResponse(
+        success=True,
+        message="Profile build started. Poll /onboarding/profile-status for progress.",
+        profile_build_status="building",
     )
 
 
