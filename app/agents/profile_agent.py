@@ -11,6 +11,7 @@ Profile Agent — Multi-agent IndiaMART supplier extraction pipeline.
 
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime
 from typing import Optional, List
@@ -18,6 +19,8 @@ from urllib.parse import urlparse, urljoin
 
 import httpx
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 from app.agents.bedrock_client import call_qwen3
 
@@ -63,9 +66,11 @@ async def _fetch(url: str, delay: float = 0.3) -> Optional[str]:
         async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
             r = await client.get(url, headers=HEADERS)
             if r.status_code != 200:
+                logger.warning(f"[Crawler] HTTP {r.status_code} for {url}")
                 return None
             return r.content.decode("utf-8", errors="replace")
-    except Exception:
+    except Exception as e:
+        logger.error(f"[Crawler] Fetch failed for {url}: {e}")
         return None
 
 
@@ -712,6 +717,12 @@ async def run_profile_pipeline(url: str, on_progress=None) -> dict:
 
     # Stage 1: Crawl
     crawl_result = await CrawlerAgent().run(url, on_progress)
+
+    # Check if crawl got any data at all
+    if not crawl_result.get("profile_html") and not crawl_result.get("category_pages"):
+        logger.error(f"[Pipeline] Crawl returned no data — IndiaMART likely blocked this IP")
+        await on_progress("failed", "Could not reach IndiaMART (blocked by server). Try again later.")
+        return {}
 
     # Collect + deduplicate + filter noise
     all_raw = []

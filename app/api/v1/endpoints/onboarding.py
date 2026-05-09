@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.base import get_db
+
+logger = logging.getLogger(__name__)
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.models.profile import AgenticProfile
@@ -231,31 +234,40 @@ async def _build_profile_from_links(profile_id: int, links: list, gst_data: dict
     """Background task: run multi-agent pipeline to build profile from IndiaMART URL."""
     from app.db.base import AsyncSessionLocal
 
+    logger.info(f"[ProfileBuild] Starting pipeline for profile_id={profile_id}, links={links}")
+
     async def update_stage(stage: str, detail: str = ""):
         """Write pipeline stage to DB so frontend can poll it."""
-        async with AsyncSessionLocal() as sess:
-            res = await sess.execute(select(AgenticProfile).where(AgenticProfile.id == profile_id))
-            p = res.scalar_one_or_none()
-            if p:
-                p.profile_build_stage = f"{stage}|{detail}"
-                await sess.commit()
-
-    async with AsyncSessionLocal() as db:
         try:
+            async with AsyncSessionLocal() as sess:
+                res = await sess.execute(select(AgenticProfile).where(AgenticProfile.id == profile_id))
+                p = res.scalar_one_or_none()
+                if p:
+                    p.profile_build_stage = f"{stage}|{detail}"
+                    await sess.commit()
+            logger.info(f"[ProfileBuild] Stage: {stage} | {detail}")
+        except Exception as e:
+            logger.error(f"[ProfileBuild] Failed to update stage: {e}")
+
+    try:
+        # Run the multi-agent pipeline with progress tracking
+        pipeline_result = await build_profile_from_multiple_urls(links, on_progress=update_stage)
+        logger.info(f"[ProfileBuild] Pipeline returned: {bool(pipeline_result)}")
+
+        async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(AgenticProfile).where(AgenticProfile.id == profile_id)
             )
             profile = result.scalar_one_or_none()
             if not profile:
+                logger.error(f"[ProfileBuild] Profile {profile_id} not found after pipeline")
                 return
-
-            # Run the multi-agent pipeline with progress tracking
-            pipeline_result = await build_profile_from_multiple_urls(links, on_progress=update_stage)
 
             if not pipeline_result:
                 profile.profile_build_status = "complete"
                 profile.profile_build_stage = "complete|No data extracted"
                 await db.commit()
+                logger.info(f"[ProfileBuild] Completed with no data extracted")
                 return
 
             # Merge with GST data
@@ -280,7 +292,6 @@ async def _build_profile_from_links(profile_id: int, links: list, gst_data: dict
             profile.profile_build_stage = "complete|Pipeline complete!"
 
             # Auto-generate profile_md for user config
-            # Flatten pipeline data so build_profile_md can read trade_name, city, etc.
             supplier = merged.get("supplier", {})
             catalog = merged.get("product_catalog", [])
             url_profile_flat = {
@@ -312,8 +323,11 @@ async def _build_profile_from_links(profile_id: int, links: list, gst_data: dict
                 cfg.profile_md = profile_md_text
 
             await db.commit()
+            logger.info(f"[ProfileBuild] Completed successfully for profile_id={profile_id}")
 
-        except Exception:
+    except Exception as e:
+        logger.error(f"[ProfileBuild] Pipeline FAILED for profile_id={profile_id}: {e}", exc_info=True)
+        try:
             async with AsyncSessionLocal() as db2:
                 result = await db2.execute(
                     select(AgenticProfile).where(AgenticProfile.id == profile_id)
@@ -321,5 +335,7 @@ async def _build_profile_from_links(profile_id: int, links: list, gst_data: dict
                 profile = result.scalar_one_or_none()
                 if profile:
                     profile.profile_build_status = "failed"
-                    profile.profile_build_stage = "failed|Pipeline error"
+                    profile.profile_build_stage = f"failed|{str(e)[:100]}"
                     await db2.commit()
+        except Exception as e2:
+            logger.error(f"[ProfileBuild] Failed to update error status: {e2}")
