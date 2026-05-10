@@ -58,11 +58,27 @@ async def complete_onboarding(
     2. Create agentic profile with GST data
     3. Mark user as onboarded
     """
-    existing = await db.execute(
+    # Check if user already has a profile (resume incomplete onboarding)
+    existing_result = await db.execute(
         select(AgenticProfile).where(AgenticProfile.user_id == current_user.id)
     )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="User already onboarded")
+    existing_profile = existing_result.scalar_one_or_none()
+    if existing_profile:
+        current_user.is_onboarded = True
+        await db.commit()
+        return OnboardingResponse(
+            success=True,
+            profile_id=existing_profile.id,
+            trade_name=existing_profile.trade_name or existing_profile.legal_name,
+        )
+
+    # Check if GSTIN is already used by another user
+    gstin_upper = request.gstin.upper()
+    gstin_result = await db.execute(
+        select(AgenticProfile).where(AgenticProfile.gstin == gstin_upper)
+    )
+    if gstin_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="This GSTIN is already registered with another account")
 
     gst_result = await verify_gstin(request.gstin)
     if not gst_result["valid"]:
@@ -73,7 +89,7 @@ async def complete_onboarding(
 
     profile = AgenticProfile(
         user_id=current_user.id,
-        gstin=request.gstin.upper(),
+        gstin=gstin_upper,
         legal_name=gst_profile["legal_name"],
         trade_name=gst_profile["trade_name"],
         business_type=gst_profile["business_type"],
