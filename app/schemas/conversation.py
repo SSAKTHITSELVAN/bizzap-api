@@ -75,3 +75,12 @@ class SupplierEscalationResponse(BaseModel):
     # action: accept | counter | hold | decline
     action: str
     counter_price: Optional[float] = None
+
+
+class SuggestResponseRequest(BaseModel):
+    lead_id: int
+
+
+class SuggestResponseOut(BaseModel):
+    suggested_message: str
+    context: Optional[str] = None

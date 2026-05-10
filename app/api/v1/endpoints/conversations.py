@@ -11,10 +11,10 @@ from app.models.requirement import Requirement
 from app.schemas.conversation import (
     ConversationOut, SendMessageRequest, SendMessageResponse,
     ToggleChatRequest, BuyerDecisionRequest, SupplierEscalationResponse,
-    MessageOut,
+    MessageOut, SuggestResponseRequest, SuggestResponseOut,
 )
-from app.agents.buyer_agent import buyer_agent_respond
-from app.agents.supplier_agent import supplier_agent_respond, get_default_agent_config
+from app.agents.buyer_agent import buyer_agent_respond, generate_buyer_suggestion
+from app.agents.supplier_agent import supplier_agent_respond, get_default_agent_config, generate_supplier_suggestion
 from app.models.user_config import UserConfig
 from app.api.v1.endpoints.config import get_or_create_config
 from datetime import datetime
@@ -319,6 +319,100 @@ async def handle_supplier_escalation(
     await db.flush()
 
     return {"success": True, "action": action, "lead_id": lead.id}
+
+
+@router.post("/suggest-response", response_model=SuggestResponseOut)
+async def suggest_response(
+    request: SuggestResponseRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate an AI-suggested next message for the human user.
+    For a seller: suggests the best response to the buyer's last message.
+    For a buyer: suggests the best response to the seller's last message.
+    Does NOT send the message — just returns a suggestion the user can edit/send.
+    """
+    lead_result = await db.execute(select(Lead).where(Lead.id == request.lead_id))
+    lead = lead_result.scalar_one_or_none()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    is_buyer = current_user.id == lead.buyer_id
+    is_supplier = current_user.id == lead.supplier_id
+    if not is_buyer and not is_supplier:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    conv_result = await db.execute(
+        select(Conversation).where(Conversation.lead_id == lead.id)
+    )
+    conversation = conv_result.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not started")
+
+    history = conversation.ai_context or []
+    user_cfg = await get_or_create_config(current_user.id, db)
+
+    if is_supplier:
+        supplier_profile_result = await db.execute(
+            select(AgenticProfile).where(AgenticProfile.user_id == lead.supplier_id)
+        )
+        supplier_profile = supplier_profile_result.scalar_one_or_none()
+
+        last_buyer_msg = ""
+        for msg in reversed(history):
+            if msg.get("role") in ("ai_buyer", "human_buyer", "user"):
+                last_buyer_msg = msg.get("content", "")
+                break
+
+        suggestion = await generate_supplier_suggestion(
+            conversation_history=history,
+            buyer_message=last_buyer_msg,
+            supplier_profile={
+                "trade_name": supplier_profile.trade_name if supplier_profile else "My Company",
+                "product_categories": supplier_profile.product_categories if supplier_profile else [],
+            },
+            negotiation_round=lead.negotiation_round,
+            profile_md=user_cfg.profile_md or "",
+            seller_settings_md=user_cfg.seller_settings_md or "",
+        )
+        return SuggestResponseOut(
+            suggested_message=suggestion,
+            context="Suggested response as seller to the buyer's last message",
+        )
+
+    else:
+        req_result = await db.execute(
+            select(Requirement).where(Requirement.id == lead.requirement_id)
+        )
+        requirement = req_result.scalar_one_or_none()
+        req_dict = {
+            "product": requirement.product if requirement else "",
+            "quantity": requirement.quantity if requirement else 0,
+            "budget_max": requirement.budget_max if requirement else 0,
+            "delivery_days": requirement.delivery_days if requirement else "",
+            "delivery_location": requirement.delivery_location if requirement else "",
+            "specifications": requirement.specifications if requirement else {},
+        }
+
+        last_supplier_msg = ""
+        for msg in reversed(history):
+            if msg.get("role") in ("ai_supplier", "human_supplier", "assistant"):
+                last_supplier_msg = msg.get("content", "")
+                break
+
+        suggestion = await generate_buyer_suggestion(
+            conversation_history=history,
+            supplier_message=last_supplier_msg,
+            requirement=req_dict,
+            negotiation_round=lead.negotiation_round,
+            profile_md=user_cfg.profile_md or "",
+            buyer_settings_md=user_cfg.buyer_settings_md or "",
+        )
+        return SuggestResponseOut(
+            suggested_message=suggestion,
+            context="Suggested response as buyer to the seller's last message",
+        )
 
 
 # ──────────────────────────── Internal helpers ────────────────────────────
