@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 
 
 class GSTVerifyRequest(BaseModel):
@@ -20,34 +20,9 @@ class GSTVerifyResponse(BaseModel):
 
 class OnboardingRequest(BaseModel):
     gstin: str
-    links: Optional[List[str]] = []   # Only IndiaMART URLs supported
 
 
 class OnboardingResponse(BaseModel):
     success: bool
     profile_id: int
     trade_name: str
-    profile_build_status: str   # building | complete
-    message: str
-
-
-class ProfileBuildStatusResponse(BaseModel):
-    profile_id: int
-    status: str
-    stage: Optional[str] = None         # current pipeline stage: crawl|identity|enrich|normalize|validate|complete
-    stage_detail: Optional[str] = None  # human-readable detail of current stage
-    trade_name: Optional[str] = None
-    product_categories: Optional[List[str]] = None
-    business_summary: Optional[str] = None
-    is_supplier: bool
-    is_buyer: bool
-
-
-class BuildFromLinkRequest(BaseModel):
-    link: str
-
-
-class BuildFromLinkResponse(BaseModel):
-    success: bool
-    message: str
-    profile_build_status: str

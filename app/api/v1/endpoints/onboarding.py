@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db.base import get_db
@@ -12,20 +11,11 @@ from app.models.profile import AgenticProfile
 from app.schemas.onboarding import (
     GSTVerifyRequest, GSTVerifyResponse,
     OnboardingRequest, OnboardingResponse,
-    ProfileBuildStatusResponse,
-    BuildFromLinkRequest, BuildFromLinkResponse,
 )
 from app.services.gst_service import verify_gstin, extract_gst_profile
-from app.agents.profile_agent import (
-    build_profile_from_multiple_urls,
-    enrich_profile_with_gst,
-    generate_profile_summary,
-)
 from app.agents.supplier_agent import get_default_agent_config
 from app.models.user_config import UserConfig
 from app.agents.config_agent import build_profile_md, DEFAULT_BUYER_SETTINGS, DEFAULT_SELLER_SETTINGS
-
-INDIAMART_PATTERN = "indiamart.com"
 
 router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
 
@@ -59,7 +49,6 @@ async def verify_gst(
 @router.post("/complete", response_model=OnboardingResponse)
 async def complete_onboarding(
     request: OnboardingRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -67,16 +56,14 @@ async def complete_onboarding(
     Complete onboarding:
     1. Verify GSTIN (mandatory)
     2. Create agentic profile with GST data
-    3. Trigger background job to build profile from URLs via Qwen3
+    3. Mark user as onboarded
     """
-    # Check if already onboarded
     existing = await db.execute(
         select(AgenticProfile).where(AgenticProfile.user_id == current_user.id)
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="User already onboarded")
 
-    # Verify GST
     gst_result = await verify_gstin(request.gstin)
     if not gst_result["valid"]:
         raise HTTPException(status_code=400, detail=gst_result["error"])
@@ -84,7 +71,6 @@ async def complete_onboarding(
     gst_data = gst_result["data"]
     gst_profile = extract_gst_profile(gst_data)
 
-    # Create profile with GST data
     profile = AgenticProfile(
         user_id=current_user.id,
         gstin=request.gstin.upper(),
@@ -106,14 +92,10 @@ async def complete_onboarding(
     db.add(profile)
     await db.flush()
 
-    # Mark user as onboarded
     current_user.is_onboarded = True
 
-    # Create initial UserConfig with GST-based profile_md
-    from sqlalchemy import select as sel3
-    from app.agents.config_agent import build_profile_md, DEFAULT_BUYER_SETTINGS, DEFAULT_SELLER_SETTINGS
-    cfg_result2 = await db.execute(sel3(UserConfig).where(UserConfig.user_id == current_user.id))
-    existing_cfg = cfg_result2.scalar_one_or_none()
+    cfg_result = await db.execute(select(UserConfig).where(UserConfig.user_id == current_user.id))
+    existing_cfg = cfg_result.scalar_one_or_none()
     if not existing_cfg:
         initial_profile_md = build_profile_md(gst_data, {})
         initial_cfg = UserConfig(
@@ -123,219 +105,11 @@ async def complete_onboarding(
             seller_settings_md=DEFAULT_SELLER_SETTINGS,
         )
         db.add(initial_cfg)
-    await db.flush()
 
-    # Filter to IndiaMART links only
-    valid_links = [l for l in (request.links or []) if l.strip() and INDIAMART_PATTERN in l.lower()]
-
-    # Trigger background profile building from URLs if provided
-    if valid_links:
-        profile.profile_build_status = "building"
-        profile.profile_build_stage = "crawl|Connecting to IndiaMART..."
-        background_tasks.add_task(
-            _build_profile_from_links,
-            profile_id=profile.id,
-            links=valid_links,
-            gst_data=gst_data,
-        )
+    await db.commit()
 
     return OnboardingResponse(
         success=True,
         profile_id=profile.id,
         trade_name=gst_profile["trade_name"] or gst_profile["legal_name"],
-        profile_build_status=profile.profile_build_status,
-        message=(
-            "Profile is being built from your IndiaMART link. This takes 30-60 seconds."
-            if valid_links else
-            "Profile created from GST data. Add your IndiaMART link later to enhance your profile."
-        ),
     )
-
-
-@router.get("/profile-status", response_model=ProfileBuildStatusResponse)
-async def get_profile_status(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Poll profile build status during onboarding."""
-    result = await db.execute(
-        select(AgenticProfile).where(AgenticProfile.user_id == current_user.id)
-    )
-    profile = result.scalar_one_or_none()
-
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found. Complete onboarding first.")
-
-    stage_raw = profile.profile_build_stage or ""
-    stage_name = stage_raw.split("|")[0] if "|" in stage_raw else stage_raw
-    stage_detail = stage_raw.split("|")[1] if "|" in stage_raw else ""
-
-    return ProfileBuildStatusResponse(
-        profile_id=profile.id,
-        status=profile.profile_build_status,
-        stage=stage_name or None,
-        stage_detail=stage_detail or None,
-        trade_name=profile.trade_name,
-        product_categories=profile.product_categories,
-        business_summary=profile.profile_summary,
-        is_supplier=profile.is_supplier,
-        is_buyer=profile.is_buyer,
-    )
-
-
-@router.post("/build-from-link", response_model=BuildFromLinkResponse)
-async def build_from_link(
-    request: BuildFromLinkRequest,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Trigger profile build from IndiaMART link (for users who skipped during onboarding)."""
-    link = request.link.strip()
-    if not link or INDIAMART_PATTERN not in link.lower():
-        raise HTTPException(status_code=400, detail="Only IndiaMART links are supported")
-
-    result = await db.execute(
-        select(AgenticProfile).where(AgenticProfile.user_id == current_user.id)
-    )
-    profile = result.scalar_one_or_none()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found. Complete onboarding first.")
-
-    if profile.profile_build_status == "building":
-        raise HTTPException(status_code=409, detail="A build is already in progress")
-
-    # Fetch GST data for the profile enrichment step
-    gst_data = {}
-    if profile.gstin:
-        gst_result = await verify_gstin(profile.gstin)
-        if gst_result["valid"]:
-            gst_data = gst_result["data"]
-
-    profile.profile_build_status = "building"
-    profile.profile_build_stage = "crawl|Connecting to IndiaMART..."
-    await db.commit()
-
-    background_tasks.add_task(
-        _build_profile_from_links,
-        profile_id=profile.id,
-        links=[link],
-        gst_data=gst_data,
-    )
-
-    return BuildFromLinkResponse(
-        success=True,
-        message="Profile build started. Poll /onboarding/profile-status for progress.",
-        profile_build_status="building",
-    )
-
-
-async def _build_profile_from_links(profile_id: int, links: list, gst_data: dict):
-    """Background task: run multi-agent pipeline to build profile from IndiaMART URL."""
-    from app.db.base import AsyncSessionLocal
-
-    logger.info(f"[ProfileBuild] Starting pipeline for profile_id={profile_id}, links={links}")
-
-    async def update_stage(stage: str, detail: str = ""):
-        """Write pipeline stage to DB so frontend can poll it."""
-        try:
-            async with AsyncSessionLocal() as sess:
-                res = await sess.execute(select(AgenticProfile).where(AgenticProfile.id == profile_id))
-                p = res.scalar_one_or_none()
-                if p:
-                    p.profile_build_stage = f"{stage}|{detail}"
-                    await sess.commit()
-            logger.info(f"[ProfileBuild] Stage: {stage} | {detail}")
-        except Exception as e:
-            logger.error(f"[ProfileBuild] Failed to update stage: {e}")
-
-    try:
-        # Run the multi-agent pipeline with progress tracking
-        pipeline_result = await build_profile_from_multiple_urls(links, on_progress=update_stage)
-        logger.info(f"[ProfileBuild] Pipeline returned: {bool(pipeline_result)}")
-
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(AgenticProfile).where(AgenticProfile.id == profile_id)
-            )
-            profile = result.scalar_one_or_none()
-            if not profile:
-                logger.error(f"[ProfileBuild] Profile {profile_id} not found after pipeline")
-                return
-
-            if not pipeline_result:
-                profile.profile_build_status = "complete"
-                profile.profile_build_stage = "complete|No data extracted"
-                await db.commit()
-                logger.info(f"[ProfileBuild] Completed with no data extracted")
-                return
-
-            # Merge with GST data
-            await update_stage("finalize", "Merging with GST data...")
-            merged = await enrich_profile_with_gst(pipeline_result, gst_data)
-
-            # Generate business summary
-            await update_stage("finalize", "Generating business summary...")
-            summary = await generate_profile_summary(merged)
-
-            # Update profile with extracted data
-            profile.product_categories = merged.get("product_categories")
-            profile.capabilities = merged.get("capabilities")
-            profile.pricing_bands = merged.get("pricing_bands")
-            profile.min_order_quantities = merged.get("min_order_quantities")
-            profile.max_order_quantities = merged.get("max_order_quantities")
-            profile.certifications = merged.get("certifications")
-            profile.is_supplier = merged.get("is_supplier", True)
-            profile.is_buyer = merged.get("is_buyer", False)
-            profile.profile_summary = summary
-            profile.profile_build_status = "complete"
-            profile.profile_build_stage = "complete|Pipeline complete!"
-
-            # Auto-generate profile_md for user config
-            supplier = merged.get("supplier", {})
-            catalog = merged.get("product_catalog", [])
-            url_profile_flat = {
-                "trade_name": supplier.get("company_name") or supplier.get("trade_name"),
-                "city": supplier.get("location", {}).get("city"),
-                "state": supplier.get("location", {}).get("state"),
-                "product_categories": merged.get("product_categories", []),
-                "capabilities": supplier.get("capabilities", {}),
-                "serviceable_locations": merged.get("serviceable_locations", []),
-                "certifications": merged.get("certifications", []),
-                "payment_terms": merged.get("payment_terms", []),
-                "business_summary": summary,
-                "products": catalog,
-            }
-            profile_md_text = build_profile_md(gst_data, url_profile_flat)
-
-            from sqlalchemy import select as sel2
-            cfg_result = await db.execute(sel2(UserConfig).where(UserConfig.user_id == profile.user_id))
-            cfg = cfg_result.scalar_one_or_none()
-            if not cfg:
-                cfg = UserConfig(
-                    user_id=profile.user_id,
-                    profile_md=profile_md_text,
-                    buyer_settings_md=DEFAULT_BUYER_SETTINGS,
-                    seller_settings_md=DEFAULT_SELLER_SETTINGS,
-                )
-                db.add(cfg)
-            else:
-                cfg.profile_md = profile_md_text
-
-            await db.commit()
-            logger.info(f"[ProfileBuild] Completed successfully for profile_id={profile_id}")
-
-    except Exception as e:
-        logger.error(f"[ProfileBuild] Pipeline FAILED for profile_id={profile_id}: {e}", exc_info=True)
-        try:
-            async with AsyncSessionLocal() as db2:
-                result = await db2.execute(
-                    select(AgenticProfile).where(AgenticProfile.id == profile_id)
-                )
-                profile = result.scalar_one_or_none()
-                if profile:
-                    profile.profile_build_status = "failed"
-                    profile.profile_build_stage = f"failed|{str(e)[:100]}"
-                    await db2.commit()
-        except Exception as e2:
-            logger.error(f"[ProfileBuild] Failed to update error status: {e2}")
