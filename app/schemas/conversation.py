@@ -46,16 +46,23 @@ class ToggleChatRequest(BaseModel):
 class LeadOut(BaseModel):
     id: int
     requirement_id: int
+    buyer_id: int
+    supplier_id: int
     fit_score: Optional[float]
     status: str
     current_offer_price: Optional[float]
+    current_offer_unit: Optional[str] = None
     current_lead_time: Optional[int]
     negotiation_round: int
+    max_negotiation_rounds: int
     buyer_chat_enabled: bool
     supplier_chat_enabled: bool
     ai_paused_for_buyer: bool
     ai_paused_for_supplier: bool
     match_reasons: Optional[List[str]]
+    final_price: Optional[float] = None
+    final_lead_time: Optional[int] = None
+    deal_closed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

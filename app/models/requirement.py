@@ -16,7 +16,7 @@ class Requirement(Base):
     quantity = Column(Float, nullable=False)
     quantity_unit = Column(String(50), nullable=True)    # kg, pieces, meters, liters
     budget_min = Column(Float, nullable=True)
-    budget_max = Column(Float, nullable=False)
+    budget_max = Column(Float, nullable=True)
     budget_unit = Column(String(20), default="INR")
 
     # Additional enriched fields (collected by AI follow-up)

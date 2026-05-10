@@ -25,14 +25,17 @@ class RequirementOut(BaseModel):
     product: str
     quantity: float
     quantity_unit: Optional[str]
-    budget_max: float
+    budget_max: Optional[float] = None
     budget_unit: str
-    specifications: Optional[dict]
-    delivery_location: Optional[str]
-    delivery_days: Optional[int]
-    order_type: Optional[str]
+    specifications: Optional[dict] = None
+    delivery_location: Optional[str] = None
+    delivery_days: Optional[int] = None
+    order_type: Optional[str] = None
     enrichment_status: str
     matched_supplier_count: int
+    is_active: bool = True
+    is_expired: bool = False
+    expires_at: Optional[datetime] = None
     created_at: datetime
 
     class Config:

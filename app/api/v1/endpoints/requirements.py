@@ -57,7 +57,6 @@ async def requirement_chat(
             raw_prompt=request.message,
             product="",
             quantity=0,
-            budget_max=0,
             enrichment_status="capturing",
             enrichment_conversation=[],
         )
@@ -81,7 +80,7 @@ async def requirement_chat(
         requirement.quantity = req_data.get("quantity", 0)
         requirement.quantity_unit = req_data.get("quantity_unit")
         requirement.budget_min = req_data.get("budget_min")
-        requirement.budget_max = req_data.get("budget_max", 0)
+        requirement.budget_max = req_data.get("budget_max")
         requirement.budget_unit = req_data.get("budget_unit", "INR")
         requirement.specifications = req_data.get("specifications")
         requirement.delivery_location = req_data.get("delivery_location")
